@@ -190,7 +190,9 @@ def find_lib(link, path=None):
         return file_names[link][0]
     print("Don't know how to find %s, skipping" % link)
 
-def osx_ch_link(path, link):
+
+def osx_ch_link(path, link_dict):
+    link = link_dict['name']
     print("Fixing linking of %s in %s" % (link, path))
     link_loc = find_lib(link, path)
     if not link_loc:
@@ -224,7 +226,15 @@ def osx_ch_link(path, link):
     # ret = '@loader_path/%s/%s/%s' % (path_to_lib, lib_to_link, basename(link))
 
     ret = ret.replace('/./', '/')
+
+    if link_dict['cmd'] == 'LC_ID_DYLIB':
+        test = join('@rpath', relpath(dirname(path),
+                    join(config.build_prefix, 'lib')),
+                    basename(link))
+        print("for identity osx_ch_link .. the next two should be the same if not this_hack_still_needed needs to be True:\n   cmp is %s\n   ret is %s" % (test, ret))
+
     return ret
+
 
 def mk_relative_osx(path, build_prefix=None):
     '''
@@ -241,7 +251,7 @@ def mk_relative_osx(path, build_prefix=None):
         config.short_build_prefix = build_prefix
 
     assert sys.platform == 'darwin' and is_obj(path)
-    s = macho.install_name_change(path, osx_ch_link)
+    s = macho.install_name_change(path, osx_ch_link, verbose = True)
 
     names = macho.otool(path)
     if names:
@@ -250,57 +260,79 @@ def mk_relative_osx(path, build_prefix=None):
         # will not be the install name (i.e., the id), but it isn't a problem,
         # because in that case it will be a no-op (with the exception of stub
         # files, which give an error, which is handled below).
-        args = [
-            'install_name_tool',
-            '-id',
-            join('@rpath', relpath(dirname(path),
-                                   join(config.build_prefix, 'lib')),
-                 basename(names[0])),
-            path,
-        ]
-        print(' '.join(args))
-        p = Popen(args, stderr=PIPE)
-        stdout, stderr = p.communicate()
-        stderr = stderr.decode('utf-8')
-        if "Mach-O dynamic shared library stub file" in stderr:
-            print("Skipping Mach-O dynamic shared library stub file %s" % path)
-            return
-        else:
-            print(stderr, file=sys.stderr)
-            if p.returncode:
-                raise RuntimeError("install_name_tool failed with exit status %d"
-            % p.returncode)
+        this_hack_still_needed = False
+        if this_hack_still_needed:
+            args = [
+                'install_name_tool',
+                '-id',
+                join('@rpath', relpath(dirname(path),
+                                       join(config.build_prefix, 'lib')),
+                     basename(names[0])),
+                path,
+            ]
+            print(' '.join(args))
+            p = Popen(args, stderr=PIPE)
+            stdout, stderr = p.communicate()
+            stderr = stderr.decode('utf-8')
+            if "Mach-O dynamic shared library stub file" in stderr:
+                print("Skipping Mach-O dynamic shared library stub file %s" % path)
+                return
+            else:
+                print(stderr, file=sys.stderr)
+                if p.returncode:
+                    raise RuntimeError("install_name_tool failed with exit status %d"
+                % p.returncode)
 
         # Add an rpath to every executable to increase the chances of it
         # being found.
-        args = [
-            'install_name_tool',
-            '-add_rpath',
-            join('@loader_path',
-                 relpath(join(config.build_prefix, 'lib'),
-                         dirname(path)), '').replace('/./', '/'),
-            path,
-            ]
-        print(' '.join(args))
-        p = Popen(args, stderr=PIPE)
-        stdout, stderr = p.communicate()
-        stderr = stderr.decode('utf-8')
-        if "Mach-O dynamic shared library stub file" in stderr:
-            print("Skipping Mach-O dynamic shared library stub file %s\n" % path)
-            return
-        elif "would duplicate path, file already has LC_RPATH for:" in stderr:
-            print("Skipping -add_rpath, file already has LC_RPATH set")
-            return
-        else:
-            print(stderr, file=sys.stderr)
-            if p.returncode:
-                raise RuntimeError("install_name_tool failed with exit status %d"
-            % p.returncode)
+        rpath = join('@loader_path',
+                     relpath(join(config.build_prefix, 'lib'),
+                             dirname(path)), '').replace('/./', '/')
+        macho.add_rpath(path, rpath, verbose = True)
+
+        # .. and remove config.build_prefix/lib which was added in-place of
+        # DYLD_FALLBACK_LIBRARY_PATH since El Capitan's SIP.
+        macho.delete_rpath(path, config.build_prefix + '/lib', verbose = True)
 
     if s:
         # Skip for stub files, which have to use binary_has_prefix_files to be
         # made relocatable.
         assert_relative_osx(path)
+
+
+def osx_ch_id(path, link_dict):
+    if link_dict['cmd'] == 'LC_ID_DYLIB':
+        return path
+
+
+def mk_osx_id_abs(path, osx_id_undos, verbose = False):
+    '''
+    Sets the id name (LD_ID_DYLIB) in the Mach-O file to path.
+
+    Since El Capitan introduced SIP, the DYLD_* environment variables can no
+    longer be used to augment the dynamic loader search path.
+
+    http://apple.stackexchange.com/questions/212945/unable-to-set-dyld-fallback-library-path-in-shell-on-osx-10-11-1
+
+    This is unfortunate because to build software in our build enviornments we
+    set DYLD_FALLBACK_LIBRARY_PATH in some recipes in conda-recipes (~2.4% of
+    them when I checked).
+
+    Adds to undo_dict the key and value to reverse this since Mach-O executables
+    will have these load commands copied into them by the linker which will then
+    fail the
+    '''
+    if is_obj(path) and not macho.is_dylib_stub(path):
+        old = macho.get_id(path)
+        print("old = %s" % old)
+        macho.install_name_change(path, osx_ch_id, verbose = False)
+        new = macho.get_id(path)
+        assert new == path, "after install_name_change(osx_ch_id), expected identity, got file(%s).id=%s" % (path, new)
+        if new in osx_id_undos:
+            assert osx_id_undos[new] == old, "osx_id_undos[new] = %s already present, but different! expected %s" % (osx_id_undos[new], old)
+        elif verbose:
+            print('Adding id install_name_change osx_id_undos entry %s -> %s' % (path, old))
+        osx_id_undos[new] = old
 
 def mk_relative_linux(f, rpaths=('lib',)):
     path = join(config.build_prefix, f)
@@ -310,9 +342,11 @@ def mk_relative_linux(f, rpaths=('lib',)):
     print('patchelf: file: %s\n    setting rpath to: %s' % (path, rpath))
     call([patchelf, '--force-rpath', '--set-rpath', rpath, path])
 
+
 def assert_relative_osx(path):
-    for name in macho.otool(path):
+    for name in macho.get_dylibs(path):
         assert not name.startswith(config.build_prefix), path
+
 
 def mk_relative(m, f):
     assert sys.platform != 'win32'
@@ -336,6 +370,14 @@ def fix_permissions(files):
         path = join(config.build_prefix, f)
         st = os.lstat(path)
         lchmod(path, stat.S_IMODE(st.st_mode) | stat.S_IWUSR) # chmod u+w
+
+
+# I don't think I can just throw stuff into m like this, it's metadata stored
+# with the package, not just random rubbish to carry about during the build!!
+#def post_install_for_build(m, files):
+#    if sys.platform == 'darwin':
+#        for f in files:
+#            mk_osx_id_abs(f, m.osx_id_undos, verbose = True)
 
 
 def post_build(m, files):
@@ -390,6 +432,7 @@ def check_symlinks(files):
         for msg in msgs:
             print("Error: %s" % msg, file=sys.stderr)
         sys.exit(1)
+
 
 def get_build_metadata(m):
     src_dir = source.get_dir()

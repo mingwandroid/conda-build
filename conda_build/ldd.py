@@ -11,13 +11,18 @@ from conda.misc import untracked
 
 from conda_build import post
 from conda_build.macho import otool
+from conda_build.macho import ldd as macho_ldd
 
 LDD_RE = re.compile(r'\s*(.*?)\s*=>\s*(.*?)\s*\(.*\)')
 LDD_NOT_FOUND_RE = re.compile(r'\s*(.*?)\s*=>\s*not found')
 
 def ldd(path):
     "thin wrapper around ldd"
-    lines = subprocess.check_output(['ldd', path]).decode('utf-8').splitlines()
+    lines = []
+    if sys.platform.startswith('linux')
+        lines = subprocess.check_output(['ldd', path]).decode('utf-8').splitlines()
+    elif sys.platform.startswith('darwin'):
+        lines = macho_ldd(path)
     res = []
     for line in lines:
         if '=>' not in line:
@@ -44,11 +49,7 @@ def get_linkages(obj_files, prefix):
 
     for f in obj_files:
         path = join(prefix, f)
-        if sys.platform.startswith('linux'):
-            res[f] = ldd(path)
-        elif sys.platform.startswith('darwin'):
-            links = otool(path)
-            res[f] = [(basename(l), l) for l in links]
+        res[f] = ldd(path)
 
     return res
 

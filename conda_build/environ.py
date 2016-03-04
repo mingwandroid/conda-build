@@ -191,7 +191,10 @@ def get_dict(m=None, prefix=None):
         d['OSX_ARCH'] = 'i386' if cc.bits == 32 else 'x86_64'
         d['CFLAGS'] = cflags + ' -arch %(OSX_ARCH)s' % d
         d['CXXFLAGS'] = cxxflags + ' -arch %(OSX_ARCH)s' % d
-        d['LDFLAGS'] = ldflags + ' -arch %(OSX_ARCH)s' % d
+        # Since El Capitan introduced SIP, the DYLD_* environment variables can no
+        # longer be used to augment the dynamic loader search path, so use -rpath
+        # instead. This is removed once the build has completed, but before testing.
+        d['LDFLAGS'] = ldflags + ' -rpath %(PREFIX)s/lib' % d + ' -arch %(OSX_ARCH)s' % d
         d['MACOSX_DEPLOYMENT_TARGET'] = '10.6'
 
     elif sys.platform.startswith('linux'):      # -------- Linux

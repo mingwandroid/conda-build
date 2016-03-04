@@ -27,8 +27,9 @@ from conda_build import environ, source, tarcheck
 from conda_build.config import config
 from conda_build.scripts import create_entry_points, prepend_bin_path
 from conda_build.post import (post_process, post_build,
-                              fix_permissions, get_build_metadata)
-from conda_build.utils import rm_rf, _check_call
+                              fix_permissions, get_build_metadata,
+                              mk_osx_id_abs)
+from conda_build.utils import rm_rf, rec_glob, _check_call
 from conda_build.index import update_index
 from conda_build.create_test import (create_files, create_shell_files,
                                      create_py_files, create_pl_files)
@@ -290,7 +291,7 @@ def get_build_index(clear_cache=True):
     return get_index(channel_urls=[url_path(config.croot)] + list(channel_urls),
                      prepend=not override_channels)
 
-def create_env(prefix, specs, clear_cache=True):
+def create_env(prefix, specs, undo_osx_ids, clear_cache=True):
     '''
     Create a conda envrionment for the given prefix and specs.
     '''
@@ -310,6 +311,16 @@ def create_env(prefix, specs, clear_cache=True):
     # ensure prefix exists, even if empty, i.e. when specs are empty
     if not isdir(prefix):
         os.makedirs(prefix)
+
+    # El Capitan SIP prevents DYLD_FALLBACK from working.
+    # This needs to go in a different branch and could only possibly
+    # happen if the build env. is created via copy instead of hard (or sym
+    # links.
+#    if sys.platform == 'darwin':
+#        dylibs = rec_glob(prefix, ['*.so', '*.dylib'])
+#        for dylib in dylibs:
+#            mk_osx_id_abs(dylib, undo_osx_ids, verbose = True)
+
 
 def warn_on_old_conda_build(index):
     root_linked = linked(cc.root_dir)
@@ -361,7 +372,6 @@ def build(m, get_src=True, post=None, include_recipe=True):
     :type post: bool or None. None means run the whole build. True means run
     post only. False means stop just before the post.
     '''
-
     if (m.get_value('build/detect_binary_files_with_prefix')
         or m.binary_has_prefix_files()):
         # We must use a long prefix here as the package will only be
@@ -396,8 +406,10 @@ def build(m, get_src=True, post=None, include_recipe=True):
         # Display the name only
         # Version number could be missing due to dependency on source info.
         print("BUILD START:", m.dist())
+        osx_id_undos = {}
         create_env(config.build_prefix,
-                   [ms.spec for ms in m.ms_depends('build')])
+                   [ms.spec for ms in m.ms_depends('build')],
+                   osx_id_undos)
 
         if m.name() in [i.rsplit('-', 2)[0] for i in linked(config.build_prefix)]:
             print("%s is installed as a build dependency. Removing." %
