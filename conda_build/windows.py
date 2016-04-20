@@ -7,6 +7,7 @@ from os.path import dirname, isdir, isfile, join, exists
 
 import conda.config as cc
 
+from conda_build.scripts import prepend_bin_path
 from conda_build.config import config
 from conda_build import environ
 from conda_build import source
@@ -177,7 +178,12 @@ def kill_processes(process_names=["msbuild.exe"]):
 
 def build(m, bld_bat):
     env = dict(os.environ)
-    env.update(environ.get_dict(m))
+    _old_path = os.environ['PATH']
+    try:
+        os.environ['PATH'] = prepend_bin_path({'PATH' : _old_path}, config.build_prefix)['PATH']
+        env.update(environ.get_dict(m))
+    finally:
+        os.environ['PATH'] = _old_path
     env = environ.prepend_bin_path(env, config.build_prefix, True)
 
     for name in 'BIN', 'INC', 'LIB':
