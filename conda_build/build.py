@@ -287,7 +287,12 @@ def create_info_files(m, files, include_recipe=True):
 
     if m.get_value('source/git_url'):
         with io.open(join(config.info_dir, 'git'), 'w', encoding='utf-8') as fo:
-            source.git_info(fo)
+            _old_path = os.environ['PATH']
+            try:
+                os.environ['PATH'] = prepend_bin_path({'PATH' : _old_path}, config.build_prefix)['PATH']
+                source.git_info(fo)
+            finally:
+                os.environ['PATH'] = _old_path
 
     if m.get_value('app/icon'):
         shutil.copyfile(join(m.path, m.get_value('app/icon')),
@@ -419,21 +424,21 @@ def build(m, get_src=True, post=None, include_recipe=True):
             plan.display_actions(actions, index)
             plan.execute_actions(actions, index)
 
-        if get_src:
-            # Execute any commands fetching the source (e.g., git) in the _build environment.
-            # This makes it possible to provide source fetchers (eg. git, hg, svn) as build
-            # dependencies.
-            _old_path = os.environ['PATH']
-            try:
-                os.environ['PATH'] = prepend_bin_path({'PATH' : _old_path}, config.build_prefix)['PATH']
+        # Execute any commands that may use revision control (e.g., git) using the
+        # _build environment PATH. This makes it possible to provide source fetchers
+        # (eg. git, hg, svn) as build dependencies.
+        _old_path = os.environ['PATH']
+        try:
+            os.environ['PATH'] = prepend_bin_path({'PATH' : _old_path}, config.build_prefix)['PATH']
+            if get_src:
                 source.provide(m.path, m.get_section('source'))
-            finally:
-                os.environ['PATH'] = _old_path
 
-        # Parse our metadata again because we did not initialize the source
-        # information before.
-        # By now, all jinja variables should be defined, so don't permit undefined vars.
-        m.parse_again(permit_undefined_jinja=False)
+            # Parse our metadata again because we did not initialize the source
+            # information before.
+            # By now, all jinja variables should be defined, so don't permit undefined vars.
+            m.parse_again(permit_undefined_jinja=False)
+        finally:
+            os.environ['PATH'] = _old_path
 
         print("Package:", m.dist())
 
