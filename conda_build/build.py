@@ -21,7 +21,7 @@ import conda.plan as plan
 from conda.api import get_index
 from conda.compat import PY3
 from conda.fetch import fetch_index
-from conda.install import prefix_placeholder, linked, move_to_trash
+from conda.install import prefix_placeholder, linked, move_to_trash, linked_data_
 from conda.utils import url_path
 from conda.resolve import Resolve, MatchSpec, NoPackagesFound
 
@@ -394,6 +394,8 @@ def build(m, get_src=True, post=None, include_recipe=True):
 
     if post in [False, None]:
         print("Removing old build environment")
+        if config.short_build_prefix in linked_data_:
+            del linked_data_[config.short_build_prefix]
         if on_win:
             if isdir(config.short_build_prefix):
                 move_to_trash(config.short_build_prefix, '')
@@ -584,6 +586,8 @@ def test(m, move_broken=True):
         return
 
     print("TEST START:", m.dist())
+    if config.build_prefix in linked_data_: del linked_data_[config.build_prefix]
+    if config.test_prefix in linked_data_: del linked_data_[config.test_prefix]
     if on_win:
         if isdir(config.build_prefix):
             move_to_trash(config.build_prefix, '')
