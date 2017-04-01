@@ -1217,6 +1217,10 @@ def test(recipedir_or_package_or_metadata, config, move_broken=True):
                                                 specs, metadata.config)
         environ.create_env(metadata.config.test_prefix, actions, config=metadata.config,
                            subdir=subdir)
+# This fails?!?
+#        environ.remove_env(actions, index, config)
+#        environ.create_env(metadata.config.test_prefix, actions, config=metadata.config,
+#                           subdir=subdir)
 
         with utils.path_prepended(metadata.config.test_prefix):
             env = dict(os.environ.copy())
@@ -1232,7 +1236,7 @@ def test(recipedir_or_package_or_metadata, config, move_broken=True):
             if utils.on_win:
                 env['PATH'] = metadata.config.test_prefix + os.pathsep + env['PATH']
 
-        # set variables like CONDA_PY in the test environment
+        # set variables like COND%A_PY in the test environment
         env.update(set_language_env_vars(metadata.config.variant))
 
         # Python 2 Windows requires that envs variables be string, not unicode
