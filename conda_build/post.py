@@ -23,6 +23,7 @@ from .conda_interface import md5_file
 from .conda_interface import PY3
 
 from conda_build import utils
+from conda_build.os_utils.pyldd import is_codefile
 
 if sys.platform.startswith('linux'):
     from conda_build.os_utils import elf
@@ -31,9 +32,7 @@ elif sys.platform == 'darwin':
 
 
 def is_obj(path):
-    assert sys.platform != 'win32'
-    return bool((sys.platform.startswith('linux') and elf.is_elf(path)) or
-                (sys.platform == 'darwin' and macho.is_macho(path)))
+    return is_codefile(path)
 
 
 def fix_shebang(f, prefix, build_python, osx_is_app=False):
