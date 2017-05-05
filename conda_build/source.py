@@ -4,7 +4,7 @@ import io
 import locale
 import logging
 import os
-from os.path import join, isdir, isfile, abspath, basename, exists, normpath
+from os.path import join, isdir, isfile, abspath, basename, exists, normpath, expanduser
 import re
 from subprocess import CalledProcessError
 import sys
@@ -54,9 +54,14 @@ def download_to_cache(metadata, config):
 
         for url in meta['url']:
             if "://" not in url:
+                if url.startswith('~'):
+                    url = expanduser(url)
                 if not os.path.isabs(url):
                     url = os.path.normpath(os.path.join(metadata.path, url))
                 url = url_path(url)
+            else:
+                if url.startswith('file://~'):
+                    url = 'file://' + expanduser(url[7:]).replace('\\', '/')
             try:
                 print("Downloading %s" % url)
                 download(url, path)
