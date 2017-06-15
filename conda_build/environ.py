@@ -488,6 +488,8 @@ def system_vars(env_dict, prefix, config):
 
     if "LANG" in os.environ:
         d['LANG'] = os.environ['LANG']
+    if "LC_ALL" in os.environ:
+        d['LC_ALL'] = os.environ['LC_ALL']
     d['PATH'] = os.environ.copy()['PATH']
     if not config.activate:
         d = prepend_bin_path(d, prefix)
