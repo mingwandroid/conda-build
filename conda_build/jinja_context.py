@@ -308,6 +308,10 @@ compilers = {
         'c': 'clang',
         'cxx': 'clangxx',
         'fortran': 'gfortran',
+        # It is likely we want to create proxy packages here instead so
+        # clang_osx-64 is a package with symlinks from x86_64-darwin13.4.0-clang => clang
+        # .. but for now ..
+        'natively_cross': True,
     },
 }
 
@@ -341,7 +345,11 @@ def compiler(language, config, permit_undefined_jinja=False):
         # support cross compilers.  A cross-compiler package will have a name such as
         #    gcc_target
         #    gcc_linux-cos6-64
-        compiler = '_'.join([compiler, config.variant['target_platform']])
+        try:
+            if nc['natively_cross']:
+                compiler = compiler
+        except:
+            compiler = '_'.join([compiler, config.variant['target_platform']])
     return compiler
 
 
