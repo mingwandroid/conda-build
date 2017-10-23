@@ -256,7 +256,7 @@ def check_circular_dependencies(render_order):
 
 def _variants_equal(metadata, output_metadata):
     match = True
-    for key, val in metadata.config.variant:
+    for key, val in metadata.config.variant.items():
         if key in output_metadata.config.variant and val != output_metadata.config.variant[key]:
             match = False
     return match
