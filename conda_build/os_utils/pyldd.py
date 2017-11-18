@@ -296,18 +296,18 @@ def mach_o_find_rpaths(ofile, arch):
     return results
 
 
-def _get_resolved_location(codefile, so, exedir, selfdir, sysroot='', resolved_rpath=None):
+def _get_resolved_location(codefile, unresolved, exedir, selfdir, sysroot='', resolved_rpath=None):
     '''Returns a tuple of resolved location, '''
     rpath_result = None
     found = False
-    if so.startswith('$RPATH'):
+    if unresolved.startswith('$RPATH'):
         these_rpaths = [resolved_rpath] if resolved_rpath else \
-                     codefile.get_rpaths_transitive() + \
-                     codefile.get_rpaths_nontransitive()
+                       codefile.get_rpaths_transitive() + \
+                       codefile.get_rpaths_nontransitive()
         for rpath in these_rpaths:
-            resolved = so.replace('$RPATH', rpath) \
-                         .replace('$SELFDIR', selfdir) \
-                         .replace('$EXEDIR', exedir)
+            resolved = unresolved.replace('$RPATH', rpath) \
+                                 .replace('$SELFDIR', selfdir) \
+                                 .replace('$EXEDIR', exedir)
             exists = os.path.exists(resolved)
             exists_sysroot = os.path.exists(os.path.join(sysroot, resolved.lstrip('/')))
             if resolved_rpath or exists or exists_sysroot:
@@ -316,10 +316,10 @@ def _get_resolved_location(codefile, so, exedir, selfdir, sysroot='', resolved_r
                 break
         if not found:
             # Return the so name so that it can be warned about as missing.
-            return so, None, False
+            return unresolved, None, False
     else:
-        resolved = so.replace('$SELFDIR', selfdir) \
-                     .replace('$EXEDIR', exedir)
+        resolved = unresolved.replace('$SELFDIR', selfdir) \
+                             .replace('$EXEDIR', exedir)
         exists = os.path.exists(resolved)
         exists_sysroot = os.path.exists(os.path.join(sysroot, resolved.lstrip('/')))
     if exists_sysroot and sysroot != '':
@@ -350,25 +350,31 @@ class machofile(object):
         file.seek(0)
         self.rpaths_transitive = initial_rpaths_transitive
         filetypes, rpaths = zip(*mach_o_find_rpaths(file, arch))
-        self.rpaths_transitive.extend(
-            [rpath.replace('@loader_path', '$SELFDIR')
-                  .replace('@executable_path', '$EXEDIR')
-                  .replace('@rpath', '$RPATH')
-             for rpath in rpaths[0] if rpath])
-        self.rpaths_nontransitive = []
+        local_rpaths = [self.from_os_varnames(rpath)
+                        for rpath in rpaths[0] if rpath]
+        self.rpaths_transitive.extend(local_rpaths)
+        self.rpaths_nontransitive = local_rpaths
         self.shared_libraries.extend(
-            [(so, so.replace('@loader_path', '$SELFDIR')
-                    .replace('@executable_path', '$EXEDIR')
-                    .replace('@rpath', '$RPATH')) for so in sos[0] if so])
+            [(so, self.from_os_varnames(so)) for so in sos[0] if so])
         file.seek(0)
         # Not actually used ..
         self.selfdir = os.path.dirname(file.name)
+
+    def to_os_varnames(self, input):
+        return input.replace('$SELFDIR', '@loader_path')    \
+                    .replace('$EXEDIR', '@executable_path') \
+                    .replace('$RPATH', '@rpath')
+
+    def from_os_varnames(self, input):
+        return input.replace('@loader_path', '$SELFDIR')    \
+                    .replace('@executable_path', '$EXEDIR') \
+                    .replace('@rpath', '$RPATH')
 
     def get_rpaths_transitive(self):
         return self.rpaths_transitive
 
     def get_rpaths_nontransitive(self):
-        return []
+        return self.rpaths_nontransitive
 
     def get_shared_libraries(self):
         return self.shared_libraries
@@ -720,17 +726,24 @@ class elffile(object):
         # TODO :: when run through QEMU also, so in that case,
         # TODO :: we must run os.path.join(sysroot,self.program_interpreter)
         # TODO :: Interesting stuff: https://www.cs.virginia.edu/~dww4s/articles/ld_linux.html
-        self.rpaths_transitive = [rpath.replace('$ORIGIN', '$SELFDIR')
-                                       .replace('$LIB', '/usr/lib')
+        self.rpaths_transitive = [self.from_os_varnames(rpath)
                                   for rpath in (self.dt_rpath +
                                                 initial_rpaths_transitive)]
-        self.rpaths_nontransitive = [rpath.replace('$ORIGIN', '$SELFDIR')
-                                          .replace('$LIB', '/usr/lib')
+        self.rpaths_nontransitive = [self.from_os_varnames(rpath)
                                      for rpath in self.dt_runpath]
         # This is implied. Making it explicit allows sharing the
         # same _get_resolved_location() function with macho-o
         self.shared_libraries = [(needed, '$RPATH/' + needed)
                                  for needed in self.dt_needed]
+
+    def to_os_varnames(self, input):
+        return input.replace('$SELFDIR', '$ORIGIN')  \
+                    .replace('/usr/lib', '$LIB')
+
+    def from_os_varnames(self, input):
+        return input.replace('$ORIGIN', '$SELFDIR')  \
+                    .replace('$LIB', '/usr/lib')
+
 
     def find_section_and_offset(self, addr):
         'Can be called immediately after the elfsections have been constructed'
@@ -841,6 +854,29 @@ def _inspect_linkages_this(filename, sysroot='', arch='native'):
             return [], []
         orig_names, resolved_names, _, in_sysroot = map(list, zip(*results))
         return orig_names, resolved_names
+
+
+def inspect_rpaths(filename, resolve_dirnames=True, use_os_varnames=True, sysroot='', arch='native'):
+    while sysroot.endswith('/') or sysroot.endswith('\\'):
+        sysroot = sysroot[:-1]
+    if arch == 'native':
+        _, _, _, _, arch = os.uname()
+    if not os.path.exists(filename):
+        return [], []
+    with open(filename, 'rb') as f:
+        # TODO :: Problems here:
+        # TODO :: 1. macOS can modify RPATH for children in each .so
+        # TODO :: 2. Linux can identify the program interpreter which can change the initial RPATHs
+        # TODO :: Should '/lib', '/usr/lib' not include (or be?!) `sysroot`(s) instead?
+        cf = codefile(f, arch, ['/lib', '/usr/lib'])
+        if resolve_dirnames:
+            return [_get_resolved_location(cf, rpath, os.path.dirname(filename), os.path.dirname(filename), sysroot)[0]
+                    for rpath in cf.rpaths_nontransitive]
+        else:
+            if use_os_varnames:
+                return [cf.to_os_varnames(rpath) for rpath in cf.rpaths_nontransitive]
+            else:
+                return cf.rpaths_nontransitive
 
 
 # TODO :: Consider returning a tree structure or a dict when recurse is True?

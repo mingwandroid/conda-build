@@ -49,29 +49,31 @@ def get_linkages(obj_files, prefix, sysroot):
         path = join(prefix, f)
         # ldd quite often fails on foreign architectures.
         ldd_failed = False
+        recurse = False
         try:
             if sys.platform.startswith('linux'):
+                resolve_filenames = True
                 res[f] = ldd(path)
             elif sys.platform.startswith('darwin'):
-                links = otool(path)
-                res[f] = [(basename(l['name']), l['name']) for l in links]
+                resolve_filenames = False
+                # links = otool(path)
+                # res[f] = [(basename(l['name']), l['name']) for l in links]
+                ldd_failed = True
         except:
             ldd_failed = True
         finally:
-            res_py = inspect_linkages(path, sysroot=sysroot)
+            res_py = inspect_linkages(path, resolve_filenames=resolve_filenames, sysroot=sysroot, recurse=recurse)
             res_py = [(basename(lp), lp) for lp in res_py]
-            # print("set(res_py) {}".format(set(res_py)))
             if ldd_failed:
                 res[f] = res_py
-            # else:
-            #   print("set(res[f]) = {}".format(set(res[f])))
-            #   if set(res[f]) != set(res_py):
-            #       print("WARNING: pyldd disagrees with ldd/otool. This will not cause any")
-            #       print("WARNING: problems for this build, but please file a bug at:")
-            #       print("WARNING: https://github.com/conda/conda-build")
-            #       print("WARNING: and (if possible) attach file {}".format(path))
-            #       print("WARNING: ldd/tool gives {}, pyldd gives {}"
-            #             .format(set(res[f]), set(res_py)))
+            else:
+                if set(res[f]) != set(res_py):
+                    print("WARNING: pyldd disagrees with ldd/otool. This will not cause any")
+                    print("WARNING: problems for this build, but please file a bug at:")
+                    print("WARNING: https://github.com/conda/conda-build")
+                    print("WARNING: and (if possible) attach file {}".format(path))
+                    print("WARNING: \nldd/otool gives:\n{}\npyldd gives:\n{}\n"
+                          .format("\n".join(str(e) for e in res[f]), "\n".join(str(e) for e in res_py)))
 
     return res
 
