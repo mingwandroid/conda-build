@@ -11,7 +11,8 @@ from conda_build.conda_interface import linked_data
 
 from conda_build import post
 from conda_build.os_utils.macho import otool
-from conda_build.os_utils.pyldd import inspect_linkages
+from conda_build.os_utils.pyldd import codefile_class, elffile, inspect_linkages, machofile
+
 
 LDD_RE = re.compile(r'\s*(.*?)\s*=>\s*(.*?)\s*\(.*\)')
 LDD_NOT_FOUND_RE = re.compile(r'\s*(.*?)\s*=>\s*not found')
@@ -49,16 +50,20 @@ def get_linkages(obj_files, prefix, sysroot):
         path = join(prefix, f)
         # ldd quite often fails on foreign architectures.
         ldd_failed = False
-        recurse = False
+        # Detect the filetype to emulate what the system-native tool does.
+        klass = codefile_class(path)
+        if klass == machofile:
+            resolve_filenames = False
+            recurse = False
+        else:
+            resolve_filenames = True
+            recurse = True
         try:
             if sys.platform.startswith('linux'):
-                resolve_filenames = True
                 res[f] = ldd(path)
             elif sys.platform.startswith('darwin'):
-                resolve_filenames = False
-                # links = otool(path)
-                # res[f] = [(basename(l['name']), l['name']) for l in links]
-                ldd_failed = True
+                links = otool(path)
+                res[f] = [(basename(l['name']), l['name']) for l in links]
         except:
             ldd_failed = True
         finally:
@@ -74,7 +79,8 @@ def get_linkages(obj_files, prefix, sysroot):
                     print("WARNING: and (if possible) attach file {}".format(path))
                     print("WARNING: \nldd/otool gives:\n{}\npyldd gives:\n{}\n"
                           .format("\n".join(str(e) for e in res[f]), "\n".join(str(e) for e in res_py)))
-
+                    print("Diffs\n{}".format(set(res[f]) - set(res_py)))
+                    print("Diffs\n{}".format(set(res_py) - set(res[f])))
     return res
 
 
