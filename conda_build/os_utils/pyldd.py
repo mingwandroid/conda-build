@@ -12,6 +12,50 @@ log = logging.getLogger(__name__)
 
 
 '''
+# Detect security flags via readelf (from https://github.com/hugsy/gef)
+# .. spawning out to readelf is not something we intend to do though ..
+@lru_cache(32)
+def checksec(filename):
+    """Check the security property of the ELF binary. The following properties are:
+    - Canary
+    - NX
+    - PIE
+    - Fortify
+    - Partial/Full RelRO.
+    Return a Python dict() with the different keys mentioned above, and the boolean
+    associated whether the protection was found."""
+
+    try:
+        readelf = which("readelf")
+    except IOError:
+        err("Missing `readelf`")
+        return
+
+    def __check_security_property(opt, filename, pattern):
+        cmd   = [readelf,]
+        cmd  += opt.split()
+        cmd  += [filename,]
+        lines = gef_execute_external(cmd, as_list=True)
+        for line in lines:
+            if re.search(pattern, line):
+                return True
+        return False
+
+    results = collections.OrderedDict()
+    results["Canary"] = __check_security_property("-s", filename, r"__stack_chk_fail") is True
+    has_gnu_stack = __check_security_property("-W -l", filename, r"GNU_STACK") is True
+    if has_gnu_stack:
+        results["NX"] = __check_security_property("-W -l", filename, r"GNU_STACK.*RWE") is False
+    else:
+        results["NX"] = False
+    results["PIE"] = __check_security_property("-h", filename, r"Type:.*EXEC") is False
+    results["Fortify"] = __check_security_property("-s", filename, r"_chk@GLIBC") is True
+    results["Partial RelRO"] = __check_security_property("-l", filename, r"GNU_RELRO") is True
+    results["Full RelRO"] = __check_security_property("-d", filename, r"BIND_NOW") is True
+    return results
+'''
+
+'''
 Eventual goal is to become a full replacement for `ldd` `otool -L` and `ntldd'
 For now only works with ELF and Mach-O files and command-line execution is not
 supported. To get the list of shared libs use `inspect_linkages(filename)`.
