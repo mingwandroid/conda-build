@@ -345,7 +345,7 @@ def _get_resolved_location(codefile,
                            exedir,
                            selfdir,
                            LD_LIBRARY_PATH='',
-                           default_paths=None,
+                           default_paths=[],
                            sysroot='',
                            resolved_rpath=None):
     '''
@@ -451,6 +451,7 @@ class machofile(object):
         file.seek(0)
         # Not actually used ..
         self.selfdir = os.path.dirname(file.name)
+        self.filename = file.name
 
     def to_os_varnames(self, input):
         return input.replace('$SELFDIR', '@loader_path')    \
@@ -496,6 +497,9 @@ class machofile(object):
     def is_executable(self):
         # TODO :: Write this.
         return True
+
+    def uniqueness_key(self):
+        return self.filename
 
 
 ###########################################
