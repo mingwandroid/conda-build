@@ -760,12 +760,16 @@ def bundle_conda(output, metadata, env, **kw):
         output['script'] = script_fn
 
     if output.get('script'):
+        interpreter = output.get('script_interpreter')
+        if not interpreter:
+            interpreter_name = guess_interpreter(output['script'])
+            interpreter = external.find_executable(interpreter_name, metadata.config.build_prefix)
+            if not interpreter:
+                log.error("Did not find an interpreter to run {}, looked for {}".format(
+                    output['script'], interpreter_name))
         with utils.path_prepended(metadata.config.build_prefix):
             env = environ.get_dict(config=metadata.config, m=metadata)
 
-        interpreter = output.get('script_interpreter')
-        if not interpreter:
-            interpreter = guess_interpreter(output['script'])
         initial_files = utils.prefix_files(metadata.config.host_prefix)
         env_output = env.copy()
         env_output['TOP_PKG_NAME'] = env['PKG_NAME']
@@ -1395,7 +1399,7 @@ def guess_interpreter(script_filename):
     # Since the MSYS2 installation is probably a set of conda packages we do not
     # need to worry about system environmental pollution here. For that reason I
     # do not pass -l on other OSes.
-    extensions_to_run_commands = {'.sh': 'bash{}'.format(' -l' if utils.on_win else ''),
+    extensions_to_run_commands = {'.sh': 'bash{}'.format('.exe' if utils.on_win else ''),
                                   '.bat': 'cmd /d /c',
                                   '.ps1': 'powershell -executionpolicy bypass -File',
                                   '.py': 'python'}
