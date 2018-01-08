@@ -11,6 +11,8 @@ def find_executable(executable, prefix=None):
     # dir_paths is referenced as a module-level variable
     #  in other code
     global dir_paths
+    if os.path.isabs(executable) and isfile(executable):
+        return executable
     if sys.platform == 'win32':
         dir_paths = [join(root_dir, 'Scripts'),
                      join(root_dir, 'Library\\mingw-w64\\bin'),
@@ -30,7 +32,7 @@ def find_executable(executable, prefix=None):
 
     for dir_path in dir_paths:
         if sys.platform == 'win32':
-            for ext in '.exe', '.bat', '':
+            for ext in '', '.exe', '.bat':
                 path = join(dir_path, executable + ext)
                 if isfile(path):
                     return path
