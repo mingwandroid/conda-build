@@ -532,8 +532,12 @@ PT_INTERP = 3
 PT_NOTE = 4
 PT_SHLIB = 5
 PT_PHDR = 6
+PT_LOOS = 0x60000000
 PT_LOPROC = 0x70000000
 PT_HIPROC = 0x7fffffff
+PT_GNU_EH_FRAME = (PT_LOOS + 0x474e550)
+PT_GNU_STACK = (PT_LOOS + 0x474e551)
+PT_GNU_RELRO = (PT_LOOS + 0x474e552)
 
 SHT_PROGBITS = 0x1
 SHT_SYMTAB = 0x2
@@ -815,6 +819,7 @@ class elffile(object):
         self.selfdir = os.path.dirname(file.name)
 
         for n in range(self.ehdr.phnum):
+            file.seek(self.ehdr.phoff + (n * self.ehdr.phentsize))
             self.programheaders.append(programheader(self.ehdr, file))
         for n in range(self.ehdr.shnum):
             file.seek(self.ehdr.shoff + (n * self.ehdr.shentsize))
