@@ -407,10 +407,6 @@ def assert_relative_osx(path, prefix):
 
 def check_overlinking(m, files, config):
     pkg_name = m.get_value('package/name')
-    warn_prelude = "WARNING ({})".format(pkg_name)
-    err_prelude = "  ERROR ({})".format(pkg_name)
-    info_prelude = "   INFO ({})".format(pkg_name)
-    msg_prelude = err_prelude if m.config.error_overlinking else warn_prelude
 
     errors = []
     def print_msg(errors, text):
@@ -420,16 +416,21 @@ def check_overlinking(m, files, config):
 
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
     build_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('build', [])]
-    sysroot = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
-    if len(sysroot):
-        sysroot = sysroot[0]
-    else:
-        sysroot = None
+    sysroots = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
+    print(config.variant['target_platform'])
+    if not len(sysroots):
+        if 'target_platform' in config.variant and config.variant['target_platform'] == 'osx-64':
+            sysroots = ['/usr/lib', '/opt/X11', '/System/Library/Frameworks']
 
     for f in files:
         path = os.path.join(config.host_prefix, f)
         if not is_obj(path):
             continue
+        warn_prelude = "WARNING ({},{})".format(pkg_name, f)
+        err_prelude = "  ERROR ({},{})".format(pkg_name, f)
+        info_prelude = "   INFO ({},{})".format(pkg_name, f)
+        msg_prelude = err_prelude if m.config.error_overlinking else warn_prelude
+
         needed = inspect_linkages(path, resolve_filenames=True, recurse=False)
         for needed_dso in needed:
             if needed_dso.startswith(config.host_prefix):
@@ -471,16 +472,19 @@ def check_overlinking(m, files, config):
             elif needed_dso.startswith(config.build_prefix):
                 print_msg(errors, "ERROR: {} found in build prefix. This should never happen.".format(needed_dso))
             else:
-                # A system dependency then. We should be able to find it in one of the CDT or compiler packages.
-                # For people not using those some whitelist should be implemented, but really, please use CDT
-                # packages instead.
-                if (m.config.verbose and sysroot and
-                    (needed_dso.startswith('/lib') or needed_dso.startswith('/usr/lib'))):
-                    # Check we have a CDT package.
+                # A system dependency then. We should be able to find it in one of the CDT or compiler packages on
+                # linux or at in a sysroot folder on other OSes.
+                #
+                if m.config.verbose and len(sysroots):
+                    # Check id we have a CDT package.
                     dso_fname = os.path.basename(needed_dso)
-                    sysroot_file = glob(os.path.join(sysroot, '**', dso_fname), recursive=True)
-                    if len(sysroot_file):
-                        in_prefix_dso = os.path.normpath(sysroot_file[0].replace(config.build_prefix + '/', ''))
+                    sysroot_files = []
+                    for sysroot in sysroots:
+                        sysroot_files.extend(glob(os.path.join(sysroot, '**', dso_fname), recursive=True))
+                    if len(sysroot_files):
+                        # Removing config.build_prefix is only *really* for Linux, though we could use
+                        # CONDA_BUILD_SYSROOT for macOS. We should figure out what to do about /opt/X11 too.
+                        in_prefix_dso = os.path.normpath(sysroot_files[0].replace(config.build_prefix + '/', ''))
                         n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                         pkgs = list(which_package(in_prefix_dso, config.build_prefix))
                         if len(pkgs):
