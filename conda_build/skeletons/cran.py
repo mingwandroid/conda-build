@@ -406,7 +406,7 @@ def clear_trailing_whitespace(string):
 
 
 def get_package_metadata(cran_url, package, session):
-    url = cran_url + 'web/packages/' + package + '/DESCRIPTION'
+    url = cran_url + '/web/packages/' + package + '/DESCRIPTION'
     r = session.get(url)
     try:
         r.raise_for_status()
@@ -462,7 +462,7 @@ def get_cran_metadata(cran_url, output_dir, verbose=True):
     session = get_session(output_dir, verbose=verbose)
     if verbose:
         print("Fetching metadata from %s" % cran_url)
-    r = session.get(cran_url + "src/contrib/PACKAGES")
+    r = session.get(cran_url + "/src/contrib/PACKAGES")
     r.raise_for_status()
     PACKAGES = r.text
     package_list = [remove_package_line_continuations(i.splitlines())
@@ -579,7 +579,7 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package):
 
 
 def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=None, version=None,
-                git_tag=None, cran_url="https://cran.r-project.org/", recursive=False, archive=True,
+                git_tag=None, cran_url="https://cran.r-project.org", recursive=False, archive=True,
                 version_compare=False, update_policy='', config=None):
 
     output_dir = realpath(output_dir)
@@ -595,6 +595,7 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
     package_dicts = {}
     package_list = []
 
+    cran_url = cran_url.rstrip('/')
     cran_metadata = get_cran_metadata(cran_url, output_dir)
 
     # r_recipes_in_output_dir = []
@@ -758,8 +759,9 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
         cached_path = None
         if not is_github_url:
             filename = '{}_{}.tar.gz'
-            contrib_url = cran_url + 'src/contrib/'
-            package_url = contrib_url + filename.format(package, d['cran_version'])
+            contrib_url = '{{ cran_mirror }}/src/contrib/'
+            contrib_url_rendered = cran_url + '/src/contrib/'
+            package_url = contrib_url_rendered + filename.format(package, d['cran_version'])
 
             # calculate sha256 by downloading source
             sha256 = hashlib.sha256()
@@ -776,7 +778,7 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
                     d['filename'] + INDENT + contrib_url +
                     'Archive/{}/'.format(package) + d['filename'])
             else:
-                d['cranurl'] = ' ' + cran_url + 'src/contrib/' + d['filename']
+                d['cranurl'] = ' ' + contrib_url + d['filename']
 
         d['cran_metadata'] = '\n'.join(['# %s' % l for l in
             cran_package['orig_lines'] if l])
