@@ -424,6 +424,7 @@ def check_overlinking(m, files, config):
             sysroots = ['/usr/lib', '/opt/X11', '/System/Library/Frameworks']
         whitelist = ['/opt/X11/',
                      '/usr/lib/libSystem.B.dylib',
+                     '/usr/lib/libcrypto.0.9.8.dylib',
                      '/usr/lib/libobjc.A.dylib',
                      '/System/Library/Frameworks/Accelerate.framework',
                      '/System/Library/Frameworks/AppKit.framework',
