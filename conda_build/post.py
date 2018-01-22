@@ -418,7 +418,7 @@ def check_overlinking(m, files, config):
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
     sysroots = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
     print(config.variant['target_platform'])
-    whilelist = []
+    whitelist = []
     if 'target_platform' in config.variant and config.variant['target_platform'] == 'osx-64':
         if not len(sysroots):
             sysroots = ['/usr/lib', '/opt/X11', '/System/Library/Frameworks']
