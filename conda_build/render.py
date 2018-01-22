@@ -527,7 +527,8 @@ def distribute_variants(metadata, variants, permit_unsatisfiable_variants=False,
 
         if 'python' in build_reqs or 'python' in host_reqs:
             conform_dict['python'] = variant['python']
-        if 'r-base' in build_reqs or 'r-base' in host_reqs:
+        if ('r-base' in build_reqs or 'r-base' in host_reqs or
+            'mro-base' in build_reqs or 'mro-base' in host_reqs):
             conform_dict['r_base'] = variant['r_base']
 
         pin_run_as_build = variant.get('pin_run_as_build', {})
