@@ -416,6 +416,7 @@ def check_overlinking(m, files, config):
         print(text)
 
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
+    host_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('host', [])]
     sysroots = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
     print(config.variant['target_platform'])
     whitelist = []
@@ -451,29 +452,26 @@ def check_overlinking(m, files, config):
                 n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                 and_also = " (and also in this package)" if in_prefix_dso in files else ""
                 pkgs = list(which_package(in_prefix_dso, config.host_prefix))
-                if len(pkgs) == 1:
-                    if pkgs[0].quad[0] not in run_reqs:
-                        print_msg(errors, '{}: {} found in {}{}'.format(msg_prelude,
-                                                                        n_dso_p,
-                                                                        pkgs[0],
-                                                                        and_also))
-                        print_msg(errors, '{}: .. but {} not in reqs/run, i.e. it is overlinked'
-                                          ' (likely) or a missing dependency (less likely)'.
-                                           format(msg_prelude, pkgs[0].quad[0]))
-                    elif m.config.verbose:
-                        print_msg(errors, '{}: {} found in {}{}'.format(info_prelude,
-                                                                        n_dso_p,
-                                                                        pkgs[0],
-                                                                        and_also))
-                elif len(pkgs) > 1:
-                    print_msg(errors, '{}: {} found in multiple packages:{}'.format(msg_prelude,
-                                                                                    in_prefix_dso,
-                                                                                    and_also))
-                    for pkg in pkgs:
-                        print_msg(errors, '{}: {}'.format(msg_prelude, pkg))
-                        if pkg.dist_name not in m.meta.requirements.host:
-                            print_msg(errors, '{}: .. but {} not in reqs/host (is transitive)'.
-                            format(msg_prelude, pkg.dist_name))
+                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
+                if len(in_pkgs_in_run_reqs) == 1 and m.config.verbose:
+                    print_msg(errors, '{}: {} found in {}{}'.format(info_prelude,
+                                                                    n_dso_p,
+                                                                    in_pkgs_in_run_reqs[0],
+                                                                    and_also))
+                elif len(in_pkgs_in_run_reqs) == 0 and len(pkgs) > 0:
+                    print_msg(errors, '{}: {} found in {}{}'.format(msg_prelude,
+                                                                    n_dso_p,
+                                                                    [p.quad[0] for p in pkgs],
+                                                                    and_also))
+                    print_msg(errors, '{}: .. but {} not in reqs/run, i.e. it is overlinked'
+                                      ' (likely) or a missing dependency (less likely)'.
+                                      format(msg_prelude, [p.quad[0] for p in pkgs]))
+                elif len(in_pkgs_in_run_reqs) > 1:
+                    print_msg(errors, '{}: {} found in multiple packages in run/reqs: {}{}'
+                                      .format(warn_prelude,
+                                              in_prefix_dso,
+                                              [p.quad[0] for p in in_pkgs_in_run_reqs],
+                                              and_also))
                 else:
                     if in_prefix_dso not in files:
                         print_msg(errors, '{}: {} not found in any packages'.format(msg_prelude,
