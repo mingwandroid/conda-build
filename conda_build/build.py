@@ -80,6 +80,9 @@ def create_post_scripts(m):
     recipe_dir = m.path
     ext = '.bat' if utils.on_win else '.sh'
     for tp in 'pre-link', 'post-link', 'pre-unlink':
+        # To have per-output link scripts they must be prefixed by the output name.
+        if hasattr(m, 'other_outputs'):
+            tp = m.name() + '-' + tp
         src = join(recipe_dir, tp + ext)
         if not isfile(src):
             continue
