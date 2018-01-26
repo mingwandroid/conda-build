@@ -417,6 +417,7 @@ def check_overlinking(m, files, config):
 
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
     host_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('host', [])]
+    # sysroots and whitelists are similar, but the subtle distinctions are important.
     sysroots = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
     print(config.variant['target_platform'])
     whitelist = []
@@ -435,7 +436,7 @@ def check_overlinking(m, files, config):
                      '/System/Library/Frameworks/Foundation.framework',
                      '/System/Library/Frameworks/GLKit.framework',
                      '/System/Library/Frameworks/ImageIO.framework']
-
+    whitelist += m.meta.get('build', {}).get('missing_dso_whitelist', [])
     for f in files:
         path = os.path.join(config.host_prefix, f)
         if not is_obj(path):
@@ -474,13 +475,7 @@ def check_overlinking(m, files, config):
                                               and_also))
                 else:
                     if in_prefix_dso not in files:
-                        dso_fname = os.path.basename(in_prefix_dso)
-                        ignored_files = m.meta.get('build/ignored_missing_dsos', [])
-                        if any(fnmatch.fnmatch(dso_fname, ignored) for ignored in ignored_files):
-                            print_msg(errors, '{}: {} ignored as-per meta'.format(info_prelude,
-                                                                                  n_dso_p))
-                        else:
-                            print_msg(errors, '{}: {} not found in any packages'.format(msg_prelude,
+                        print_msg(errors, '{}: {} not found in any packages'.format(msg_prelude,
                                                                                        in_prefix_dso))
                     elif m.config.verbose:
                         print_msg(errors, '{}: {} found in this package'.format(info_prelude,
@@ -489,9 +484,11 @@ def check_overlinking(m, files, config):
                 print_msg(errors, "ERROR: {} found in build prefix; should never happen".format(
                     needed_dso))
             else:
-                # A system dependency then. We should be able to find it in one of the CDT o
-                # compiler packages on linux or at in a sysroot folder on other OSes.
-                #
+                # A system or ignored dependency. We should be able to find it in one of the CDT o
+                # compiler packages on linux or at in a sysroot folder on other OSes. These usually
+                # start with '$RPATH/' which indicates pyldd did not find them, so remove that now.
+                if needed_dso.startswith('$RPATH/'):
+                    needed_dso = needed_dso.replace('$PATH/', '')
                 in_whitelist = any([needed_dso.startswith(w) for w in whitelist])
                 if in_whitelist:
                     n_dso_p = "Needed DSO {}".format(needed_dso)
@@ -523,15 +520,8 @@ def check_overlinking(m, files, config):
                                           " .. do you need to use install_name_tool/patchelf?".
                                           format(msg_prelude, needed_dso))
                 else:
-                    # When a needed_dso begins with $RPATH it means we are making a CDT package
-                    # (in any other case this would be a problem), but I should verify it is ok
-                    # for CDT packages too.
-                    if needed_dso.startswith('$RPATH'):
-                        print_msg(errors, "{}: {} returned by pyldd. A CDT package?".
-                                          format(warn_prelude, needed_dso))
-                    else:
-                        print_msg(errors, "{}: did not find - or even know where to look for: {}".
-                                          format(msg_prelude, needed_dso))
+                    print_msg(errors, "{}: did not find - or even know where to look for: {}".
+                                      format(msg_prelude, needed_dso))
     if len(errors):
         sys.exit(1)
 
