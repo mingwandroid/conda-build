@@ -488,7 +488,7 @@ def check_overlinking(m, files, config):
                 # compiler packages on linux or at in a sysroot folder on other OSes. These usually
                 # start with '$RPATH/' which indicates pyldd did not find them, so remove that now.
                 if needed_dso.startswith('$RPATH/'):
-                    needed_dso = needed_dso.replace('$PATH/', '')
+                    needed_dso = needed_dso.replace('$RPATH/', '')
                 in_whitelist = any([needed_dso.startswith(w) for w in whitelist])
                 if in_whitelist:
                     n_dso_p = "Needed DSO {}".format(needed_dso)
