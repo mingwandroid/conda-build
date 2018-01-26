@@ -81,9 +81,13 @@ def create_post_scripts(m):
     ext = '.bat' if utils.on_win else '.sh'
     for tp in 'pre-link', 'post-link', 'pre-unlink':
         # To have per-output link scripts they must be prefixed by the output name.
+        tp += ext
         if hasattr(m, 'other_outputs'):
             tp = m.name() + '-' + tp
-        src = join(recipe_dir, tp + ext)
+            dst_name = '.' + tp
+        else:
+            dst_name = '.' + m.name() + '-' + tp
+        src = join(recipe_dir, tp)
         if not isfile(src):
             continue
         # TODOCROSS :: utils.on_win here needs to check if the host is Windows instead.
@@ -91,7 +95,7 @@ def create_post_scripts(m):
                        'Scripts' if utils.on_win else 'bin')
         if not isdir(dst_dir):
             os.makedirs(dst_dir, 0o775)
-        dst = join(dst_dir, '.%s-%s%s' % (m.name(), tp, ext))
+        dst = join(dst_dir, dst_name)
         utils.copy_into(src, dst, m.config.timeout, locking=m.config.locking)
         os.chmod(dst, 0o775)
 
