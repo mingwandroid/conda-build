@@ -474,8 +474,14 @@ def check_overlinking(m, files, config):
                                               and_also))
                 else:
                     if in_prefix_dso not in files:
-                        print_msg(errors, '{}: {} not found in any packages'.format(msg_prelude,
-                                                                                    in_prefix_dso))
+                        dso_fname = os.path.basename(in_prefix_dso)
+                        ignored_files = m.meta.get('build/ignored_missing_dsos', [])
+                        if any(fnmatch.fnmatch(dso_fname, ignored) for ignored in ignored_files):
+                            print_msg(errors, '{}: {} ignored as-per meta'.format(info_prelude,
+                                                                                  n_dso_p))
+                        else:
+                            print_msg(errors, '{}: {} not found in any packages'.format(msg_prelude,
+                                                                                       in_prefix_dso))
                     elif m.config.verbose:
                         print_msg(errors, '{}: {} found in this package'.format(info_prelude,
                                                                                 in_prefix_dso))
