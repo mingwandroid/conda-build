@@ -486,10 +486,6 @@ def check_overlinking(m, files, config):
                 # A system dependency then. We should be able to find it in one of the CDT o
                 # compiler packages on linux or at in a sysroot folder on other OSes.
                 #
-                if 'Python.framework' in needed_dso:
-                    print("WTF?")
-                if needed_dso.startswith('/System/Library/Frameworks/Python.framework'):
-                    print("Debug me")
                 in_whitelist = any([needed_dso.startswith(w) for w in whitelist])
                 if in_whitelist:
                     n_dso_p = "Needed DSO {}".format(needed_dso)
