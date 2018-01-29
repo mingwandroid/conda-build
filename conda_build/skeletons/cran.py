@@ -160,15 +160,15 @@ IF %ERRORLEVEL% NEQ 0 exit 1
 
 # We hardcode the fact that CRAN does not provide win32 binaries here.
 CRAN_BLD_BAT_MIXED = """\
-if %target_platform% == "win-64" goto skip_source_build
+if "%target_platform%" == "win-64" goto skip_source_build
 "%R%" CMD INSTALL --build .
 IF %ERRORLEVEL% NEQ 0 exit 1
 exit 0
 :skip_source_build
 mkdir %PREFIX%\lib\R\library
-robocopy /E {cran_packagename} "%PREFIX%\lib\R\library\"
-IF %ERRORLEVEL% EQ 1 exit 0
-exit 1
+robocopy /E . "%PREFIX%\lib\R\library\{cran_packagename}"
+if %ERRORLEVEL% NEQ 1 exit 1
+exit 0
 """
 
 INDENT = '\n    - '
