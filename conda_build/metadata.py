@@ -1101,7 +1101,7 @@ class MetaData(object):
         dependencies = self.get_used_vars()
 
         # filter out ignored versions
-        build_string_excludes = ['python', 'r_base', 'perl', 'lua', 'numpy', 'target_platform']
+        build_string_excludes = ['python', 'r_base', 'perl', 'lua', 'numpy', 'target_platform', 'cran_mirror']
         build_string_excludes.extend(ensure_list(self.config.variant.get('ignore_version', [])))
         # always exclude older stuff that's always in the build string (py, np, pl, r, lua)
         if build_string_excludes:
