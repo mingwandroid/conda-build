@@ -6,8 +6,8 @@ from __future__ import absolute_import, division, print_function
 
 from itertools import chain
 from os import makedirs, listdir, sep
-from os.path import (basename, commonprefix, exists, isabs,
-                     isdir, isfile, join, normpath, realpath)
+from os.path import (basename, commonprefix, exists, isabs, isdir,
+                     isfile, join, normpath, realpath, relpath, splitext)
 import re
 import subprocess
 import sys
@@ -583,9 +583,10 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package):
     (*) `package` could be:
     1. A package name beginning (or not) with 'r-'
     2. A GitHub URL
-    3. A relative path to a recipe from output_dir
-    4. An absolute path to a recipe (fatal unless in the output_dir hierarchy)
-    5. Any of the above ending (or not) in sep or '/'
+    3. A file:// URL to a tarball
+    4. A relative path to a recipe from output_dir
+    5. An absolute path to a recipe (fatal unless in the output_dir hierarchy)
+    6. Any of the above ending (or not) in sep or '/'
 
     So this function cleans all that up:
 
@@ -608,7 +609,12 @@ def package_to_inputs_dict(output_dir, output_suffix, git_tag, package):
         pkg_name = strip_end(pkg_name, output_suffix)
     if pkg_name.startswith('r-'):
         pkg_name = pkg_name[2:]
-    if isabs(package):
+    if package.startswith('file://'):
+        location = package.replace('file://', '')
+        pkg_filename = basename(location)
+        pkg_name = re.match(r'(.*)_(.*)', pkg_filename).group(1).lower()
+        existing_location = existing_recipe_dir(output_dir, output_suffix, 'r-' + pkg_name)
+    elif isabs(package):
         commp = commonprefix((package, output_dir))
         if commp != output_dir:
             raise RuntimeError("package %s specified with abs path outside of output-dir %s" % (
@@ -689,30 +695,35 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
         location = inputs['location']
         pkg_name = inputs['pkg-name']
         is_github_url = location and 'github.com' in location
+        is_tarfile = tarfile.is_tarfile(location)
         url = inputs['location']
 
         dir_path = inputs['new-location']
         print("Making/refreshing recipe for {}".format(pkg_name))
 
         # Bodges GitHub packages into cran_metadata
-        if is_github_url:
+        if is_github_url or is_tarfile:
             rm_rf(config.work_dir)
-            m = metadata.MetaData.fromdict({'source': {'git_url': location}}, config=config)
-            source.git_source(m.get_section('source'), m.config.git_cache, m.config.work_dir)
-            new_git_tag = git_tag if git_tag else get_latest_git_tag(config)
-            p = subprocess.Popen(['git', 'checkout', new_git_tag], stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, cwd=config.work_dir)
-            stdout, stderr = p.communicate()
-            stdout = stdout.decode('utf-8')
-            stderr = stderr.decode('utf-8')
-            if p.returncode:
-                sys.exit("Error: 'git checkout %s' failed (%s).\nInvalid tag?" %
-                         (new_git_tag, stderr.strip()))
-            if stdout:
-                print(stdout, file=sys.stdout)
-            if stderr:
-                print(stderr, file=sys.stderr)
-
+            if is_github_url:
+                m = metadata.MetaData.fromdict({'source': {'git_url': location}}, config=config)
+                source.git_source(m.get_section('source'), m.config.git_cache, m.config.work_dir)
+                new_git_tag = git_tag if git_tag else get_latest_git_tag(config)
+                p = subprocess.Popen(['git', 'checkout', new_git_tag], stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, cwd=config.work_dir)
+                stdout, stderr = p.communicate()
+                stdout = stdout.decode('utf-8')
+                stderr = stderr.decode('utf-8')
+                if p.returncode:
+                    sys.exit("Error: 'git checkout %s' failed (%s).\nInvalid tag?" %
+                             (new_git_tag, stderr.strip()))
+                if stdout:
+                    print(stdout, file=sys.stdout)
+                if stderr:
+                    print(stderr, file=sys.stderr)
+            else:
+                m = metadata.MetaData.fromdict({'source': {'url': location}}, config=config)
+                source.unpack(m.get_section('source'), m.config.work_dir, m.config.src_cache,
+                              output_dir, m.config.work_dir)
             DESCRIPTION = join(config.work_dir, "DESCRIPTION")
             if not isfile(DESCRIPTION):
                 sub_description_pkg = join(config.work_dir, 'pkg', "DESCRIPTION")
@@ -743,7 +754,7 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
         # Make sure package always uses the CRAN capitalization
         package = cran_metadata[package.lower()]['Package']
 
-        if not is_github_url:
+        if not is_github_url and not is_tarfile:
             session = get_session(output_dir)
             cran_metadata[package.lower()].update(get_package_metadata(cran_url,
             package, session))
@@ -811,7 +822,7 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
         cran_layout = {'source': {'selector': '{others}',
                                   'dir': 'src/contrib/',
                                   'ext': '.tar.gz',
-                                  'use_this': not is_github_url},
+                                  'use_this': not is_github_url or is_tarfile},
                        'win-64': {'selector': 'win64',
                                   'dir': 'bin/windows/contrib/{}/'.format(use_binaries_ver),
                                   'ext': '.zip',
@@ -823,19 +834,26 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
         available = {}
         for archive_type, archive_details in iteritems(cran_layout):
             if archive_details['use_this']:
-                filename = '{}_{}'.format(package, d['cran_version']) + archive_details['ext']
-                contrib_url = '{{{{ cran_mirror }}}}/{}'.format(archive_details['dir'])
-                contrib_url_rendered = cran_url + '/{}'.format(archive_details['dir'])
-                package_url = contrib_url_rendered + filename
-                sha256 = hashlib.sha256()
-                print("Downloading {} from {}".format(archive_type, package_url))
-                # We may need to inspect the file later to determine which compilers are needed.
-                try:
-                    cached_path, _ = source.download_to_cache(config.src_cache, '',
-                                                              dict({'url': package_url,
-                                                                    'fn': archive_type + '-' + filename}))
-                except:
-                    continue
+                if is_tarfile:
+                    filename = basename(location)
+                    contrib_url = relpath(location, dir_path)
+                    contrib_url_rendered = package_url = contrib_url
+                    sha256 = hashlib.sha256()
+                    cached_path = location
+                else:
+                    filename = '{}_{}'.format(package, d['cran_version']) + archive_details['ext']
+                    contrib_url = '{{{{ cran_mirror }}}}/{}'.format(archive_details['dir'])
+                    contrib_url_rendered = cran_url + '/{}'.format(archive_details['dir'])
+                    package_url = contrib_url_rendered + filename
+                    sha256 = hashlib.sha256()
+                    print("Downloading {} from {}".format(archive_type, package_url))
+                    # We may need to inspect the file later to determine which compilers are needed.
+                    try:
+                        cached_path, _ = source.download_to_cache(config.src_cache, '',
+                                                                  dict({'url': package_url,
+                                                                        'fn': archive_type + '-' + filename}))
+                    except:
+                        continue
                 sha256.update(open(cached_path, 'rb').read())
                 available_details = {}
                 available_details['selector'] = archive_details['selector']
@@ -899,11 +917,14 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
             filename = available_details['filename']
             contrib_url = available_details['contrib_url']
             if archive:
-                available_details['cranurl'] = (INDENT + contrib_url +
-                    filename + sel_src + INDENT + contrib_url +
-                    'Archive/{}/'.format(package) + filename + sel_src)
+                if is_tarfile:
+                    available_details['cranurl'] = (INDENT + contrib_url)
+                else:
+                    available_details['cranurl'] = (INDENT + contrib_url +
+                        filename + sel_src + INDENT + contrib_url +
+                        'Archive/{}/'.format(package) + filename + sel_src)
             else:
-                available_details['cranurl'] = ' ' + contrib_url + filename + src
+                available_details['cranurl'] = ' ' + contrib_url + filename + sel_src
 
         d['cran_metadata'] = '\n'.join(['# %s' % l for l in
             cran_package['orig_lines'] if l])
