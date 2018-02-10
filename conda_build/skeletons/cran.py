@@ -695,7 +695,7 @@ def skeletonize(in_packages, output_dir=".", output_suffix="", add_maintainer=No
         location = inputs['location']
         pkg_name = inputs['pkg-name']
         is_github_url = location and 'github.com' in location
-        is_tarfile = tarfile.is_tarfile(location)
+        is_tarfile = location and isfile(location) and tarfile.is_tarfile(location)
         url = inputs['location']
 
         dir_path = inputs['new-location']
