@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function
 
+from builtins import range
 from collections import defaultdict
 import fnmatch
 from functools import partial
@@ -416,7 +417,6 @@ def check_overlinking(m, files, config):
         print(text)
 
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
-    host_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('host', [])]
     # sysroots and whitelists are similar, but the subtle distinctions are important.
     sysroots = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
     print(config.variant['target_platform'])
@@ -480,7 +480,7 @@ def check_overlinking(m, files, config):
                 else:
                     if in_prefix_dso not in files:
                         print_msg(errors, '{}: {} not found in any packages'.format(msg_prelude,
-                                                                                       in_prefix_dso))
+                                                                                    in_prefix_dso))
                     elif m.config.verbose:
                         print_msg(errors, '{}: {} found in this package'.format(info_prelude,
                                                                                 in_prefix_dso))
@@ -509,7 +509,12 @@ def check_overlinking(m, files, config):
                         # Removing config.build_prefix is only *really* for Linux, though we could
                         # use CONDA_BUILD_SYSROOT for macOS. We should figure out what to do about
                         # /opt/X11 too.
-                        in_prefix_dso = os.path.normpath(sysroot_files[0].replace(
+                        # Find the longest suffix match.
+                        rev_needed_dso = needed_dso[::-1]
+                        match_lens = [len(os.path.commonprefix([s[::-1], rev_needed_dso]))
+                                      for s in sysroot_files]
+                        idx = max(range(len(match_lens)), key=match_lens.__getitem__)
+                        in_prefix_dso = os.path.normpath(sysroot_files[idx].replace(
                             config.build_prefix + '/', ''))
                         n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                         pkgs = list(which_package(in_prefix_dso, config.build_prefix))
@@ -517,7 +522,8 @@ def check_overlinking(m, files, config):
                             print_msg(errors, '{}: {} found in CDT/compiler package {}'.
                                               format(info_prelude, n_dso_p, pkgs[0]))
                         else:
-                            print_msg(errors, '{}: {} not found in any CDT/compiler package, nor the whitelist?!'.
+                            print_msg(errors, '{}: {} not found in any CDT/compiler package,'
+                                              ' nor the whitelist?!'.
                                           format(msg_prelude, n_dso_p))
                     else:
                         print_msg(errors, "{}: {} not found in sysroot, is this binary repackaging?"
