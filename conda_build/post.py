@@ -454,7 +454,11 @@ def check_overlinking(m, files, config):
                 and_also = " (and also in this package)" if in_prefix_dso in files else ""
                 pkgs = list(which_package(in_prefix_dso, config.host_prefix))
                 in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
-                if len(in_pkgs_in_run_reqs) == 1 and m.config.verbose:
+                in_whitelist = any([in_prefix_dso == w for w in whitelist])
+                if in_whitelist:
+                    print_msg(errors, '{}: {} found in the whitelist'.
+                              format(info_prelude, n_dso_p))
+                elif len(in_pkgs_in_run_reqs) == 1 and m.config.verbose:
                     print_msg(errors, '{}: {} found in {}{}'.format(info_prelude,
                                                                     n_dso_p,
                                                                     in_pkgs_in_run_reqs[0],
