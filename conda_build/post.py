@@ -435,7 +435,8 @@ def check_overlinking(m, files, config):
                      '/System/Library/Frameworks/CoreGraphics.framework',
                      '/System/Library/Frameworks/Foundation.framework',
                      '/System/Library/Frameworks/GLKit.framework',
-                     '/System/Library/Frameworks/ImageIO.framework']
+                     '/System/Library/Frameworks/ImageIO.framework',
+                     '/System/Library/Frameworks/SystemConfiguration.framework']
     whitelist += m.meta.get('build', {}).get('missing_dso_whitelist', [])
     for f in files:
         path = os.path.join(config.host_prefix, f)
