@@ -4,7 +4,7 @@ from builtins import range
 from collections import defaultdict
 import fnmatch
 from functools import partial
-from glob import glob
+from glob2 import glob
 import io
 import locale
 import re
@@ -18,18 +18,23 @@ except ImportError:
     readlink = False
 
 from conda_build.os_utils import external
-from .conda_interface import lchmod
-from .conda_interface import walk_prefix
-from .conda_interface import md5_file
-from .conda_interface import PY3
-from .conda_interface import TemporaryDirectory
+from conda_build.conda_interface import lchmod
+from conda_build.conda_interface import walk_prefix
+from conda_build.conda_interface import md5_file
+from conda_build.conda_interface import PY3
+from conda_build.conda_interface import TemporaryDirectory
 
 from conda_build import utils
 from conda_build.os_utils.pyldd import is_codefile, inspect_linkages
-from conda_build.inspect import which_package
+from conda_build.inspect_pkg import which_package
 
 if sys.platform == 'darwin':
     from conda_build.os_utils import macho
+
+if PY3:
+    scandir = os.scandir
+else:
+    from scandir import scandir
 
 
 def is_obj(path):
@@ -161,13 +166,14 @@ def remove_easy_install_pth(files, prefix, config, preserve_egg_dir=False):
 
 def rm_py_along_so(prefix):
     """remove .py (.pyc) files alongside .so or .pyd files"""
-    for root, _, files in os.walk(prefix):
-        for fn in files:
-            if fn.endswith(('.so', '.pyd')):
-                name, _ = os.path.splitext(fn)
-                for ext in '.py', '.pyc', '.pyo':
-                    if name + ext in files:
-                        os.unlink(os.path.join(root, name + ext))
+
+    files = list(scandir(prefix))
+    for fn in files:
+        if fn.is_file() and fn.name.endswith(('.so', '.pyd')):
+            name, _ = os.path.splitext(fn.path)
+            for ext in '.py', '.pyc', '.pyo':
+                if name + ext in files:
+                    os.unlink(name + ext)
 
 
 def rm_pyo(files, prefix):
@@ -406,22 +412,23 @@ def assert_relative_osx(path, prefix):
         assert not name.startswith(prefix), path
 
 
-def check_overlinking(m, files, config):
+def print_msg(errors, text):
+    if text.startswith("  ERROR"):
+        errors.append(text)
+    print(text)
+
+
+def check_overlinking(m, files):
     pkg_name = m.get_value('package/name')
 
     errors = []
 
-    def print_msg(errors, text):
-        if text.startswith("  ERROR"):
-            errors.append(text)
-        print(text)
-
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
     # sysroots and whitelists are similar, but the subtle distinctions are important.
-    sysroots = glob(os.path.join(config.build_prefix, '**', 'sysroot'), recursive=True)
-    print(config.variant['target_platform'])
+    sysroots = glob(os.path.join(m.config.build_prefix, '**', 'sysroot'), recursive=True)
+    print(m.config.variant['target_platform'])
     whitelist = []
-    if 'target_platform' in config.variant and config.variant['target_platform'] == 'osx-64':
+    if 'target_platform' in m.config.variant and m.config.variant['target_platform'] == 'osx-64':
         if not len(sysroots):
             sysroots = ['/usr/lib', '/opt/X11', '/System/Library/Frameworks']
         whitelist = ['/opt/X11/',
@@ -439,7 +446,7 @@ def check_overlinking(m, files, config):
                      '/System/Library/Frameworks/SystemConfiguration.framework']
     whitelist += m.meta.get('build', {}).get('missing_dso_whitelist', [])
     for f in files:
-        path = os.path.join(config.host_prefix, f)
+        path = os.path.join(m.config.host_prefix, f)
         if not is_obj(path):
             continue
         warn_prelude = "WARNING ({},{})".format(pkg_name, f)
@@ -449,11 +456,11 @@ def check_overlinking(m, files, config):
 
         needed = inspect_linkages(path, resolve_filenames=True, recurse=False)
         for needed_dso in needed:
-            if needed_dso.startswith(config.host_prefix):
-                in_prefix_dso = os.path.normpath(needed_dso.replace(config.host_prefix + '/', ''))
+            if needed_dso.startswith(m.config.host_prefix):
+                in_prefix_dso = os.path.normpath(needed_dso.replace(m.config.host_prefix + '/', ''))
                 n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                 and_also = " (and also in this package)" if in_prefix_dso in files else ""
-                pkgs = list(which_package(in_prefix_dso, config.host_prefix))
+                pkgs = list(which_package(in_prefix_dso, m.config.host_prefix))
                 in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
                 in_whitelist = any([in_prefix_dso == w for w in whitelist])
                 if in_whitelist:
@@ -485,7 +492,7 @@ def check_overlinking(m, files, config):
                     elif m.config.verbose:
                         print_msg(errors, '{}: {} found in this package'.format(info_prelude,
                                                                                 in_prefix_dso))
-            elif needed_dso.startswith(config.build_prefix):
+            elif needed_dso.startswith(m.config.build_prefix):
                 print_msg(errors, "ERROR: {} found in build prefix; should never happen".format(
                     needed_dso))
             else:
@@ -516,9 +523,9 @@ def check_overlinking(m, files, config):
                                       for s in sysroot_files]
                         idx = max(range(len(match_lens)), key=match_lens.__getitem__)
                         in_prefix_dso = os.path.normpath(sysroot_files[idx].replace(
-                            config.build_prefix + '/', ''))
+                            m.config.build_prefix + '/', ''))
                         n_dso_p = "Needed DSO {}".format(in_prefix_dso)
-                        pkgs = list(which_package(in_prefix_dso, config.build_prefix))
+                        pkgs = list(which_package(in_prefix_dso, m.config.build_prefix))
                         if len(pkgs):
                             print_msg(errors, '{}: {} found in CDT/compiler package {}'.
                                               format(info_prelude, n_dso_p, pkgs[0]))
@@ -537,21 +544,21 @@ def check_overlinking(m, files, config):
         sys.exit(1)
 
 
-def post_process_shared_lib(m, f, files, config):
-    path = os.path.join(config.host_prefix, f)
+def post_process_shared_lib(m, f, files):
+    path = os.path.join(m.config.host_prefix, f)
     if not is_obj(path):
         return
     if sys.platform.startswith('linux'):
-        mk_relative_linux(f, config.host_prefix, rpaths=m.get_value('build/rpaths', ['lib']))
+        mk_relative_linux(f, m.config.host_prefix, rpaths=m.get_value('build/rpaths', ['lib']))
     elif sys.platform == 'darwin':
-        mk_relative_osx(path, config.host_prefix, config.build_prefix, files=files)
+        mk_relative_osx(path, m.config.host_prefix, m.config.build_prefix, files=files)
 
 
 def fix_permissions(files, prefix):
     print("Fixing permissions")
-    for root, dirs, _ in os.walk(prefix):
-        for dn in dirs:
-            lchmod(os.path.join(root, dn), 0o775)
+    for path in scandir(prefix):
+        if path.is_dir():
+            lchmod(path.path, 0o775)
 
     for f in files:
         path = os.path.join(prefix, f)
@@ -571,12 +578,12 @@ def fix_permissions(files, prefix):
                 log.warn(str(e))
 
 
-def post_build(m, files, build_python, config):
+def post_build(m, files, build_python):
     print('number of files:', len(files))
-    fix_permissions(files, config.host_prefix)
+    fix_permissions(files, m.config.host_prefix)
 
     for f in files:
-        make_hardlink_copy(f, config.host_prefix)
+        make_hardlink_copy(f, m.config.host_prefix)
 
     if sys.platform == 'win32':
         return
@@ -586,17 +593,17 @@ def post_build(m, files, build_python, config):
         print("Skipping binary relocation logic")
     osx_is_app = bool(m.get_value('build/osx_is_app', False)) and sys.platform == 'darwin'
 
-    check_symlinks(files, config.host_prefix, config.croot)
-    prefix_files = utils.prefix_files(config.host_prefix)
+    check_symlinks(files, m.config.host_prefix, m.config.croot)
+    prefix_files = utils.prefix_files(m.config.host_prefix)
 
     for f in files:
         if f.startswith('bin/'):
-            fix_shebang(f, prefix=config.host_prefix, build_python=build_python,
+            fix_shebang(f, prefix=m.config.host_prefix, build_python=build_python,
                         osx_is_app=osx_is_app)
         if binary_relocation is True or (isinstance(binary_relocation, list) and
                                          f in binary_relocation):
-            post_process_shared_lib(m, f, prefix_files, config)
-    check_overlinking(m, files, config)
+            post_process_shared_lib(m, f, prefix_files)
+    check_overlinking(m, files)
 
 
 def check_symlinks(files, prefix, croot):
