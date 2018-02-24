@@ -18,6 +18,7 @@ import sys
 import tarfile
 import hashlib
 import logging
+import time
 
 # this is to compensate for a requests idna encoding error.  Conda is a better place to fix,
 #   eventually
@@ -67,10 +68,47 @@ from conda_verify.verify import Verify
 from conda import __version__ as conda_version
 from conda_build import __version__ as conda_build_version
 
+if sys.platform == 'win32':
+    import conda_build.windows as windows
+
 if 'bsd' in sys.platform:
     shell_path = '/bin/sh'
 else:
     shell_path = '/bin/bash'
+
+
+def stats_key(metadata, desc):
+    # get the build string from whatever conda-build makes of the configuration
+    used_loop_vars = metadata.get_used_loop_vars()
+    build_vars = '-'.join([k + '_' + str(metadata.config.variant[k]) for k in used_loop_vars
+                          if k != 'target_platform'])
+    # kind of a special case.  Target platform determines a lot of output behavior, but may not be
+    #    explicitly listed in the recipe.
+    tp = metadata.config.variant.get('target_platform')
+    if tp and tp != metadata.config.subdir and 'target_platform' not in build_vars:
+        build_vars += '-target_' + tp
+    key = [metadata.name(), metadata.version()]
+    if build_vars:
+        key.append(build_vars)
+    key = "-".join(key)
+    key = desc + key
+    return key
+
+
+def seconds_to_text(secs):
+    m, s = divmod(secs, 60)
+    h, m = divmod(int(m), 60)
+    return "{:d}:{:02d}:{:04.1f}".format(h, m, s)
+
+
+def log_stats(stats_dict, descriptor):
+    print("\nResource usage statistics from {}:".format(descriptor))
+    print("   Process count: {}".format(stats_dict['processes']))
+    print("   CPU time: Sys={}, User={}".format(seconds_to_text(stats_dict['cpu_sys']),
+                                                seconds_to_text(stats_dict['cpu_user'])))
+    print("   Memory: {}".format(utils.bytes2human(stats_dict['rss'])))
+    print("   Disk usage: {}".format(utils.bytes2human(stats_dict['disk'])))
+    print("   Time elapsed: {}\n".format(seconds_to_text(stats_dict['elapsed'])))
 
 
 def create_post_scripts(m):
@@ -150,9 +188,10 @@ def have_prefix_files(files, prefix):
                 # Use the placeholder for maximal backwards compatibility, and
                 # to minimize the occurrences of usernames appearing in built
                 # packages.
-                rewrite_file_with_new_prefix(path, mm[:], prefix_bytes, prefix_placeholder_bytes)
+                data = mm[:]
                 mm.close()
                 fi.close()
+                rewrite_file_with_new_prefix(path, data, prefix_bytes, prefix_placeholder_bytes)
                 fi = open(path, 'rb+')
                 mm = utils.mmap_mmap(fi.fileno(), 0, tagname=None, flags=utils.mmap_MAP_PRIVATE)
         if mm.find(prefix_bytes) != -1:
@@ -181,61 +220,63 @@ def rewrite_file_with_new_prefix(path, data, old_prefix, new_prefix):
     return data
 
 
+def _copy_top_level_recipe(path, config, dest_dir, destination_subdir=None):
+    files = utils.rec_glob(path, "*")
+    file_paths = sorted([f.replace(path + os.sep, '') for f in files])
+
+    # when this actually has a value, we're copying the top-level recipe into a subdirectory,
+    #    so that we have record of what parent recipe produced subpackages.
+    if destination_subdir:
+        dest_dir = join(dest_dir, destination_subdir)
+    else:
+        # exclude meta.yaml because the json dictionary captures its content
+        file_paths = [f for f in file_paths if not (f == 'meta.yaml' or
+                                                    f == 'conda_build_config.yaml')]
+    file_paths = utils.filter_files(file_paths, path)
+    for f in file_paths:
+        utils.copy_into(join(path, f), join(dest_dir, f),
+                        timeout=config.timeout,
+                        locking=config.locking, clobber=True)
+
+
+def _copy_output_recipe(m, dest_dir):
+    src_dir = m.meta.get('extra', {}).get('parent_recipe', {}).get('path')
+    if src_dir:
+        _copy_top_level_recipe(src_dir, m.config, dest_dir, 'parent')
+
+        this_output = m.get_rendered_output(m.name()) or {}
+        install_script = this_output.get('script')
+        build_inputs = []
+        inputs = [install_script] + build_inputs
+        file_paths = [script for script in inputs if script]
+        file_paths = utils.filter_files(file_paths, src_dir)
+    else:
+        file_paths = []
+
+    for f in file_paths:
+        utils.copy_into(join(src_dir, f), join(dest_dir, f),
+                        timeout=m.config.timeout,
+                        locking=m.config.locking, clobber=True)
+
+
 def copy_recipe(m):
-    output_metadata = m.copy()
-    if output_metadata.config.include_recipe and output_metadata.include_recipe():
-        recipe_dir = join(output_metadata.config.info_dir, 'recipe')
+    if m.config.include_recipe and m.include_recipe():
+        # store the rendered meta.yaml file, plus information about where it came from
+        #    and what version of conda-build created it
+        recipe_dir = join(m.config.info_dir, 'recipe')
         try:
             os.makedirs(recipe_dir)
         except:
             pass
-
-        if os.path.isdir(output_metadata.path):
-            files = utils.rec_glob(m.path, "*")
-            src_dir = m.path
-            file_paths = sorted([f.replace(m.path + os.sep, '') for f in files])
-            # exclude meta.yaml because the json dictionary captures its content
-            file_paths = [f for f in file_paths if not (f == 'meta.yaml' or
-                                                        f == 'conda_build_config.yaml')]
-            file_paths = utils.filter_files(file_paths, m.path)
-            # store the rendered meta.yaml file, plus information about where it came from
-            #    and what version of conda-build created it
-            original_recipe = os.path.join(output_metadata.path, 'meta.yaml')
+        if os.path.isdir(m.path):
+            _copy_top_level_recipe(m.path, m.config, recipe_dir)
+            original_recipe = m.meta_path
         # it's a subpackage.
         else:
+            _copy_output_recipe(m, recipe_dir)
             original_recipe = ""
-            # this will be a subsection for just this output
 
-            src_dir = m.meta.get('extra', {}).get('parent_recipe', {}).get('path')
-            if src_dir:
-                this_output_text = m.get_recipe_text()
-                this_output = {}
-                if this_output_text:
-                    this_output = yaml.safe_load(m._get_contents(permit_undefined_jinja=True,
-                                                                 template_string=this_output_text))
-                if isinstance(this_output, list):
-                    this_output = this_output[0]
-                install_script = this_output.get('script')
-                # # HACK: conda-build renames the actual test script from the recipe into
-                # #    run_test.* in the package.  This makes the test discovery code work.
-                # if test_script:
-                #     ext = os.path.splitext(test_script)[1]
-                #     test_script = 'run_test' + ext
-                build_inputs = []
-                for build_input in ('build.sh', 'bld.bat'):
-                    if os.path.isfile(os.path.join(src_dir, build_input)):
-                        build_inputs.append(build_input)
-                inputs = [install_script] + build_inputs
-                file_paths = [script for script in inputs if script]
-                file_paths = utils.filter_files(file_paths, src_dir)
-            else:
-                file_paths = []
-
-        for f in file_paths:
-            utils.copy_into(join(src_dir, f), join(recipe_dir, f),
-                            timeout=output_metadata.config.timeout,
-                            locking=output_metadata.config.locking, clobber=True)
-
+        output_metadata = m.copy()
         # hard code the build string, so that tests don't get it mixed up
         build = output_metadata.meta.get('build', {})
         build['string'] = output_metadata.build_id()
@@ -718,7 +759,7 @@ def post_process_files(m, initial_prefix_files):
         sys.exit(indent("""Error: Untracked file(s) %s found in conda-meta directory.
 This error usually comes from using conda in the build script.  Avoid doing this, as it
 can lead to packages that include their dependencies.""" % meta_files))
-    post_build(m, new_files, build_python=python, config=m.config)
+    post_build(m, new_files, build_python=python)
 
     entry_point_script_names = get_entry_point_script_names(m.get_value('build/entry_points'))
     if m.noarch == 'python':
@@ -740,7 +781,7 @@ can lead to packages that include their dependencies.""" % meta_files))
     return new_files
 
 
-def bundle_conda(output, metadata, env, **kw):
+def bundle_conda(output, metadata, env, stats, **kw):
     log = utils.get_logger(__name__)
     log.info('Packaging %s', metadata.dist())
 
@@ -753,21 +794,27 @@ def bundle_conda(output, metadata, env, **kw):
 
     # Use script from recipe?
     script = utils.ensure_list(metadata.get_value('build/script', None))
+
     # need to treat top-level stuff specially.  build/script in top-level stuff should not be
     #     re-run for an output with a similar name to the top-level recipe
     is_output = 'package:' not in metadata.get_recipe_text()
-    if script and is_output:
+    top_build = metadata.get_top_level_recipe_without_outputs().get('build', {}) or {}
+    activate_script = metadata.activate_build_script
+    if (script and not output.get('script')) and (is_output or not top_build.get('script')):
+        # do add in activation, but only if it's not disabled
+        activate_script = metadata.config.activate
         script = '\n'.join(script)
-
         suffix = "bat" if utils.on_win else "sh"
         script_fn = output.get('script') or 'output_script.{}'.format(suffix)
-        with open(os.path.join(metadata.config.work_dir, script_fn), 'a') as f:
+        with open(os.path.join(metadata.config.work_dir, script_fn), 'w') as f:
             f.write('\n')
             f.write(script)
             f.write('\n')
         output['script'] = script_fn
 
     if output.get('script'):
+        env = environ.get_dict(config=metadata.config, m=metadata)
+
         interpreter = output.get('script_interpreter')
         if not interpreter:
             interpreter_and_args = guess_interpreter(output['script'])
@@ -777,8 +824,6 @@ def bundle_conda(output, metadata, env, **kw):
                     output['script'], interpreter_and_args[0]))
         else:
             interpreter_and_args = interpreter.split(' ')
-        with utils.path_prepended(metadata.config.build_prefix):
-            env = environ.get_dict(config=metadata.config, m=metadata)
 
         initial_files = utils.prefix_files(metadata.config.host_prefix)
         env_output = env.copy()
@@ -793,14 +838,23 @@ def bundle_conda(output, metadata, env, **kw):
             env_output[var] = os.environ[var]
         dest_file = os.path.join(metadata.config.work_dir, output['script'])
         recipe_dir = (metadata.path or
-                      metadata.meta.get('extra', {}).get('parent_recipe', {}).get('path'))
+                      metadata.meta.get('extra', {}).get('parent_recipe', {}).get('path', ''))
         utils.copy_into(os.path.join(recipe_dir, output['script']), dest_file)
+        if activate_script:
+            _write_activation_text(dest_file, metadata)
+
+        bundle_stats = {}
         utils.check_call_env(interpreter_and_args + [dest_file],
-                            cwd=metadata.config.work_dir, env=env_output)
+                             cwd=metadata.config.work_dir, env=env_output, stats=bundle_stats)
+        log_stats(bundle_stats, "bundling {}".format(metadata.name()))
+        if stats is not None:
+            stats[stats_key(metadata, 'bundle_{}'.format(metadata.name()))] = bundle_stats
+
     elif files:
         # Files is specified by the output
         # we exclude the list of files that we want to keep, so post-process picks them up as "new"
-        keep_files = set(utils.expand_globs(files, metadata.config.host_prefix))
+        keep_files = set(os.path.normpath(pth)
+                         for pth in utils.expand_globs(files, metadata.config.host_prefix))
         pfx_files = set(utils.prefix_files(metadata.config.host_prefix))
         initial_files = set(item for item in (pfx_files - keep_files)
                             if not any(keep_file.startswith(item + os.path.sep)
@@ -915,7 +969,7 @@ def bundle_conda(output, metadata, env, **kw):
     return final_output
 
 
-def bundle_wheel(output, metadata, env):
+def bundle_wheel(output, metadata, env, stats):
     with TemporaryDirectory() as tmpdir, utils.tmp_chdir(metadata.config.work_dir):
         utils.check_call_env(['pip', 'wheel', '--wheel-dir', tmpdir, '--no-deps', '.'], env=env)
         wheel_files = glob(os.path.join(tmpdir, "*.whl"))
@@ -949,8 +1003,70 @@ bundlers = {
 }
 
 
-def build(m, post=None, need_source_download=True, need_reparse_in_env=False, built_packages=None,
-          notest=False):
+def _write_sh_activation_text(file_handle, m):
+    cygpath_prefix = "$(cygpath -u " if utils.on_win else ""
+    cygpath_suffix = " )" if utils.on_win else ""
+    activate_path = ''.join((cygpath_prefix,
+                            os.path.join(utils.root_script_dir, 'activate').replace('\\', '\\\\'),
+                            cygpath_suffix))
+    build_prefix_path = ''.join((cygpath_prefix,
+                                m.config.build_prefix.replace('\\', '\\\\'),
+                                cygpath_suffix))
+
+    file_handle.write('source "{0}" "{1}"\n'.format(activate_path, build_prefix_path))
+
+    # conda 4.4 requires a conda-meta/history file for a valid conda prefix
+    history_file = join(m.config.build_prefix, 'conda-meta', 'history')
+    if not isfile(history_file):
+        if not isdir(dirname(history_file)):
+            os.makedirs(dirname(history_file))
+        open(history_file, 'a').close()
+
+    if m.is_cross:
+        # HACK: we need both build and host envs "active" - i.e. on PATH,
+        #     and with their activate.d scripts sourced. Conda only
+        #     lets us activate one, though. This is a
+        #     vile hack to trick conda into "stacking"
+        #     two environments.
+        #
+        # Net effect: binaries come from host first, then build
+        #
+        # Conda 4.4 may break this by reworking the activate scripts.
+        #  ^^ shouldn't be true
+        # In conda 4.4, export CONDA_MAX_SHLVL=2 to stack envs to two
+        #   levels deep.
+        # conda 4.4 does require that a conda-meta/history file
+        #   exists to identify a valid conda environment
+        history_file = join(m.config.host_prefix, 'conda-meta', 'history')
+        if not isfile(history_file):
+            if not isdir(dirname(history_file)):
+                os.makedirs(dirname(history_file))
+            open(history_file, 'a').close()
+        file_handle.write('unset CONDA_PATH_BACKUP\n')
+        file_handle.write('export CONDA_MAX_SHLVL=2\n')
+        host_prefix_path = ''.join((cygpath_prefix,
+                                   m.config.host_prefix.replace('\\', '\\\\'),
+                                   cygpath_suffix))
+        file_handle.write('source "{0}" "{1}"\n' .format(activate_path, host_prefix_path))
+
+
+def _write_activation_text(script_path, m):
+    with open(script_path, 'r+') as fh:
+        data = fh.read()
+        fh.seek(0)
+        if os.path.splitext(script_path)[1].lower() == ".bat":
+            windows._write_bat_activation_text(fh, m)
+        elif os.path.splitext(script_path)[1].lower() == ".sh":
+            _write_sh_activation_text(fh, m)
+        else:
+            log = utils.get_logger(__name__)
+            log.warn("not adding activation to {} - I don't know how to do so for "
+                        "this file type".format(script_path))
+        fh.write(data)
+
+
+def build(m, stats, post=None, need_source_download=True, need_reparse_in_env=False,
+          built_packages=None, notest=False):
     '''
     Build the package with the specified metadata.
 
@@ -1162,7 +1278,6 @@ def build(m, post=None, need_source_download=True, need_reparse_in_env=False, bu
                     build_file = join(src_dir, 'bld.bat')
                     with open(build_file, 'w') as bf:
                         bf.write(script)
-                import conda_build.windows as windows
                 windows.build(m, build_file)
             else:
                 build_file = join(m.path, 'build.sh')
@@ -1184,42 +1299,7 @@ def build(m, post=None, need_source_download=True, need_reparse_in_env=False, bu
                                 bf.write('export {0}="{1}"\n'.format(k, v))
 
                         if m.config.activate and not m.name() == 'conda':
-                            bf.write('source "{0}activate" "{1}"\n'
-                                     .format(utils.root_script_dir + os.path.sep,
-                                             m.config.build_prefix))
-
-                            # conda 4.4 requires a conda-meta/history file for a valid conda prefix
-                            history_file = join(m.config.build_prefix, 'conda-meta', 'history')
-                            if not isfile(history_file):
-                                if not isdir(dirname(history_file)):
-                                    os.makedirs(dirname(history_file))
-                                open(history_file, 'a').close()
-
-                            if m.is_cross:
-                                # HACK: we need both build and host envs "active" - i.e. on PATH,
-                                #     and with their activate.d scripts sourced. Conda only
-                                #     lets us activate one, though. This is a
-                                #     vile hack to trick conda into "stacking"
-                                #     two environments.
-                                #
-                                # Net effect: binaries come from host first, then build
-                                #
-                                # Conda 4.4 may break this by reworking the activate scripts.
-                                #  ^^ shouldn't be true
-                                # In conda 4.4, export CONDA_MAX_SHLVL=2 to stack envs to two
-                                #   levels deep.
-                                # conda 4.4 does require that a conda-meta/history file
-                                #   exists to identify a valid conda environment
-                                history_file = join(m.config.host_prefix, 'conda-meta', 'history')
-                                if not isfile(history_file):
-                                    if not isdir(dirname(history_file)):
-                                        os.makedirs(dirname(history_file))
-                                    open(history_file, 'a').close()
-                                bf.write('unset CONDA_PATH_BACKUP\n')
-                                bf.write('export CONDA_MAX_SHLVL=2\n')
-                                bf.write('source "{0}activate" "{1}"\n'
-                                         .format(utils.root_script_dir + os.path.sep,
-                                                 m.config.host_prefix))
+                            _write_sh_activation_text(bf, m)
                         if script:
                                 bf.write(script)
                         if isfile(build_file) and not script:
@@ -1228,9 +1308,14 @@ def build(m, post=None, need_source_download=True, need_reparse_in_env=False, bu
                     os.chmod(work_file, 0o766)
 
                     cmd = [shell_path] + (['-x'] if m.config.debug else []) + ['-e', work_file]
+
                     # this should raise if any problems occur while building
-                    utils.check_call_env(cmd, env=env, cwd=src_dir)
+                    build_stats = {}
+                    utils.check_call_env(cmd, env=env, cwd=src_dir, stats=build_stats)
                     utils.remove_pycache_from_scripts(m.config.host_prefix)
+                    log_stats(build_stats, "building {}".format(m.name()))
+                    if stats is not None:
+                        stats[stats_key(m, 'build')] = build_stats
 
     prefix_file_list = join(m.config.build_folder, 'prefix_files.txt')
     initial_files = set()
@@ -1298,7 +1383,11 @@ def build(m, post=None, need_source_download=True, need_reparse_in_env=False, bu
                     # for more than one output, we clear and rebuild the environment before each
                     #    package.  We also do this for single outputs that present their own
                     #    build reqs.
-                    if m.meta['extra'].get('parent_recipe'):
+                    if not (m.meta['extra'].get('parent_recipe') or
+                            (os.path.isdir(m.config.host_prefix) and
+                             len(os.listdir(m.config.host_prefix)) <= 1)):
+                        log.debug('Not creating new env for output - already exists from top-level')
+                    else:
                         utils.rm_rf(m.config.host_prefix)
                         utils.rm_rf(m.config.build_prefix)
                         utils.rm_rf(m.config.test_prefix)
@@ -1359,7 +1448,7 @@ def build(m, post=None, need_source_download=True, need_reparse_in_env=False, bu
                     #    can be different from the env for the top level build.
                     with utils.path_prepended(m.config.build_prefix):
                         env = environ.get_dict(config=m.config, m=m)
-                    built_package = bundlers[output_d.get('type', 'conda')](output_d, m, env)
+                    built_package = bundlers[output_d.get('type', 'conda')](output_d, m, env, stats)
                     # warn about overlapping files.
                     if 'checksums' in output_d:
                         for file, csum in output_d['checksums'].items():
@@ -1467,18 +1556,17 @@ def _construct_metadata_for_test_from_package(package, config):
 
     if package_data['subdir'] != 'noarch':
         config.host_subdir = package_data['subdir']
-    if config.filename_hashing:
-        # We may be testing an (old) package built without filename hashing.
-        hash_input = os.path.join(info_dir, 'hash_input.json')
-        if os.path.isfile(hash_input):
-            with open(os.path.join(info_dir, 'hash_input.json')) as f:
-                hash_input = json.load(f)
-        else:
-            config.filename_hashing = False
-            hash_input = {}
-        # not actually used as a variant, since metadata will have been finalized.
-        #    This is still necessary for computing the hash correctly though
-        config.variant = hash_input
+    # We may be testing an (old) package built without filename hashing.
+    hash_input = os.path.join(info_dir, 'hash_input.json')
+    if os.path.isfile(hash_input):
+        with open(os.path.join(info_dir, 'hash_input.json')) as f:
+            hash_input = json.load(f)
+    else:
+        config.filename_hashing = False
+        hash_input = {}
+    # not actually used as a variant, since metadata will have been finalized.
+    #    This is still necessary for computing the hash correctly though
+    config.variant = hash_input
 
     log = utils.get_logger(__name__)
 
@@ -1528,6 +1616,9 @@ def _construct_metadata_for_test_from_package(package, config):
                                                 'string': package_data['build']},
                                       'requirements': {'run': package_data['depends']}
                                       }, config=config)
+    # HACK: because the recipe is fully baked, detecting "used" variables no longer works.  The set
+    #     of variables in the hash_input suffices, though.
+    metadata.config.used_vars = list(hash_input.keys())
     return metadata, hash_input
 
 
@@ -1568,7 +1659,7 @@ def construct_metadata_for_test(recipedir_or_package, config):
     return m, hash_input
 
 
-def test(recipedir_or_package_or_metadata, config, move_broken=True):
+def test(recipedir_or_package_or_metadata, config, stats, move_broken=True):
     '''
     Execute any test scripts for the given package.
 
@@ -1622,6 +1713,16 @@ def test(recipedir_or_package_or_metadata, config, move_broken=True):
         return True
 
     if metadata.config.remove_work_dir:
+        if os.path.isdir(metadata.config.build_prefix):
+            # move build folder to force hardcoded paths to build env to break during tests
+            #    (so that they can be properly addressed by recipe author)
+            dest = os.path.join(os.path.dirname(metadata.config.build_prefix),
+                        '_'.join(('build_prefix_moved', metadata.dist(),
+                                    metadata.config.host_subdir)))
+            # Needs to come after create_files in case there's test/source_files
+            print("Renaming build prefix directory, ", metadata.config.build_prefix, " to ", dest)
+            os.rename(config.build_prefix, dest)
+
         # nested if so that there's no warning when we just leave the empty workdir in place
         if metadata.source_provided:
             dest = os.path.join(os.path.dirname(metadata.config.work_dir),
@@ -1789,11 +1890,16 @@ def test(recipedir_or_package_or_metadata, config, move_broken=True):
     else:
         cmd = [shell_path] + (['-x'] if metadata.config.debug else []) + ['-e', test_script]
     try:
-        utils.check_call_env(cmd, env=env, cwd=metadata.config.test_dir)
+        test_stats = {}
+        utils.check_call_env(cmd, env=env, cwd=metadata.config.test_dir, stats=test_stats)
+        log_stats(test_stats, "testing {}".format(metadata.name()))
+        if stats is not None:
+            stats[stats_key(metadata, 'test_{}'.format(metadata.name()))] = test_stats
     except subprocess.CalledProcessError:
         tests_failed(metadata, move_broken=move_broken, broken_dir=metadata.config.broken_dir,
                         config=metadata.config)
         raise
+
     if config.need_cleanup and config.recipe_dir is not None:
         utils.rm_rf(config.recipe_dir)
     print("TEST END:", test_package_name)
@@ -1839,7 +1945,7 @@ Error:
 """ % (os.pathsep.join(external.dir_paths)))
 
 
-def build_tree(recipe_list, config, build_only=False, post=False, notest=False,
+def build_tree(recipe_list, config, stats, build_only=False, post=False, notest=False,
                need_source_download=True, need_reparse_in_env=False, variants=None):
 
     to_build_recursive = []
@@ -1856,6 +1962,8 @@ def build_tree(recipe_list, config, build_only=False, post=False, notest=False,
     extra_help = ""
     built_packages = OrderedDict()
     retried_recipes = []
+    initial_time = time.time()
+    stats_file = config.stats_file
 
     # this is primarily for exception handling.  It's OK that it gets clobbered by
     #     the loop below.
@@ -1922,7 +2030,7 @@ def build_tree(recipe_list, config, build_only=False, post=False, notest=False,
                 if metadata.name() not in metadata.config.build_folder:
                     metadata.config.compute_build_id(metadata.name(), reset=True)
 
-                packages_from_this = build(metadata,
+                packages_from_this = build(metadata, stats,
                                            post=post,
                                            need_source_download=need_source_download,
                                            need_reparse_in_env=need_reparse_in_env,
@@ -1933,7 +2041,7 @@ def build_tree(recipe_list, config, build_only=False, post=False, notest=False,
                     for pkg, dict_and_meta in packages_from_this.items():
                         if pkg.endswith('.tar.bz2'):
                             # we only know how to test conda packages
-                            test(pkg, config=metadata.config)
+                            test(pkg, config=metadata.config, stats=stats)
                         built_packages.update({pkg: dict_and_meta})
                 else:
                     built_packages.update(packages_from_this)
@@ -2007,6 +2115,27 @@ for Python 3.5 and needs to be rebuilt."""
         wheels = [f for f in built_packages if f.endswith('.whl')]
         handle_anaconda_upload(tarballs, config=config)
         handle_pypi_upload(wheels, config=config)
+
+    total_time = time.time() - initial_time
+    max_memory_used = max([step.get('rss') for step in stats.values()] or [0])
+    total_disk = sum([step.get('disk') for step in stats.values()] or [0])
+    total_cpu_sys = sum([step.get('cpu_sys') for step in stats.values()] or [0])
+    total_cpu_user = sum([step.get('cpu_user') for step in stats.values()] or [0])
+
+    print("#####################################################")
+    print("Resource usage summary:")
+    print("\nTotal time: {}".format(seconds_to_text(total_time)))
+    print("CPU usage: sys={}, user={}".format(seconds_to_text(total_cpu_sys),
+                                              seconds_to_text(total_cpu_user)))
+    print("Maximum memory usage observed: {}".format(utils.bytes2human(max_memory_used)))
+    print("Total disk usage observed (not including envs): {}".format(
+        utils.bytes2human(total_disk)))
+    stats['total'] = {'time': total_time,
+                      'memory': max_memory_used,
+                      'disk': total_disk}
+    if stats_file:
+        with open(stats_file, 'w') as f:
+            json.dump(stats, f)
 
     return list(built_packages.keys())
 
