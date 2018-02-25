@@ -52,6 +52,12 @@ ARCH_MAP = {'32': 'x86',
 #    regex, which extract all outputs in order.
 output_re = re.compile(r"^\s+-\s(?:name|type):.+?(?=^\w|\Z|^\s+-\s(?:name|type))",
                        flags=re.M | re.S)
+numpy_xx_re = re.compile(r'(numpy\s*x\.x)|pin_compatible\([\'\"]numpy.*max_pin=[\'\"]x\.x[\'\"]')
+# TODO: there's probably a way to combine these, but I can't figure out how to many the x
+#     capturing group optional.
+numpy_compatible_x_re = re.compile(
+    r'pin_\w+\([\'\"]numpy[\'\"].*((?<=x_pin=[\'\"])[x\.]*(?=[\'\"]))')
+numpy_compatible_re = re.compile(r"pin_\w+\([\'\"]numpy[\'\"]")
 
 # used to avoid recomputing/rescanning recipe contents for used variables
 used_vars_cache = {}
@@ -515,7 +521,9 @@ def build_string_from_metadata(metadata):
                                                                                ''))
                                 if variant_version:
                                     break
-                            res.append(''.join([s] + variant_version.split('.')[:places]))
+                            entry = ''.join([s] + variant_version.split('.')[:places])
+                            if entry not in res:
+                                res.append(entry)
 
         features = ensure_list(metadata.get_value('build/features', []))
         if res:
@@ -697,7 +705,7 @@ def get_updated_output_dict_from_reparsed_metadata(original_dict, new_outputs):
 def _filter_recipe_text(text, extract_pattern=None):
     if extract_pattern:
         match = re.search(extract_pattern, text, flags=re.MULTILINE | re.DOTALL)
-        text = match.group(1) if match else ""
+        text = "\n".join(set(string for string in match.groups() if string)) if match else ""
     return text
 
 
@@ -753,7 +761,7 @@ class MetaData(object):
 
     @property
     def is_cross(self):
-        return bool(self.get_value('requirements/host'))
+        return bool(self.get_depends_top_and_out('host'))
 
     @property
     def final(self):
@@ -1033,8 +1041,17 @@ class MetaData(object):
             build_int = ""
         return build_int
 
+    def get_depends_top_and_out(self, typ):
+        meta_requirements = ensure_list(self.get_value('requirements/' + typ, []))
+        if 'outputs' in self.meta:
+            matching_output = [out for out in self.meta.get('outputs') if
+                               out.get('name') == self.name()]
+            if matching_output:
+                meta_requirements += utils.expand_reqs(
+                    matching_output[0].get('requirements', [])).get(typ, [])
+        return meta_requirements
+
     def ms_depends(self, typ='run'):
-        res = []
         names = ('python', 'numpy', 'perl', 'lua')
         name_ver_list = [(name, self.config.variant[name])
                          for name in names
@@ -1044,6 +1061,7 @@ class MetaData(object):
             name_ver_list.extend([('r', self.config.variant['r_base']),
                                   ('r-base', self.config.variant['r_base']),
                                   ])
+        specs = OrderedDict()
         for spec in ensure_list(self.get_value('requirements/' + typ, [])):
             try:
                 ms = MatchSpec(spec)
@@ -1072,8 +1090,8 @@ class MetaData(object):
                         msg += "\nPerhaps you meant '%s %s%s'" % (ms.name,
                             parts[1], parts[2])
                     sys.exit(msg)
-            res.append(ms)
-        return res
+            specs[spec] = ms
+        return list(specs.values())
 
     def get_hash_contents(self):
         """
@@ -1101,8 +1119,14 @@ class MetaData(object):
         dependencies = self.get_used_vars()
 
         # filter out ignored versions
-        build_string_excludes = ['python', 'r_base', 'perl', 'lua', 'numpy', 'target_platform', 'cran_mirror']
+        build_string_excludes = ['python', 'r_base', 'perl', 'lua', 'target_platform']
         build_string_excludes.extend(ensure_list(self.config.variant.get('ignore_version', [])))
+        if 'numpy' in dependencies:
+            pin_compatible, not_xx = self.uses_numpy_pin_compatible_without_xx
+            # numpy_xx means it is accounted for in the build string, with npXYY
+            # if not pin_compatible, then we don't care about the usage, and omit it from the hash.
+            if self.numpy_xx or not pin_compatible:
+                build_string_excludes.append('numpy')
         # always exclude older stuff that's always in the build string (py, np, pl, r, lua)
         if build_string_excludes:
             exclude_pattern = re.compile('|'.join('{}[\s$]?.*'.format(exc)
@@ -1482,25 +1506,28 @@ class MetaData(object):
         return recipe_text.rstrip()
 
     def extract_requirements_text(self, force_top_level=False):
-        is_output = 'package:' not in self.get_recipe_text()
-        if not is_output:
-            # start of line means top-level requirements
-            filter_ = r'(^requirements:.*?)(^\s*test:|^\s*extra:|^\s*about:|^outputs:|\Z)'
-        else:
-            # outputs are already filtered into each output for us
-            filter_ = r'(^\s*requirements:.*?)(^\s*test:|^\s*extra:|^\s*about:|^\s*-\sname:|^outputs:|\Z)'  # NOQA
-        return self.get_recipe_text(filter_, force_top_level=force_top_level)
+        # outputs are already filtered into each output for us
+        f = r'(^\s*requirements:.*?)(?=^\s*test:|^\s*extra:|^\s*about:|^\s*-\sname:|^outputs:|\Z)'  # NOQA
+        if 'package:' in self.get_recipe_text():
+            # match top-level requirements - start of line means top-level requirements
+            #    ^requirements:.*?
+            # match output with similar name
+            #    (?:-\sname:\s+%s.*?)requirements:.*?
+            # terminate match of other sections
+            #    (?=^\s*-\sname|^\s*test:|^\s*extra:|^\s*about:|^outputs:|\Z)
+            f = r'(^requirements:.*?|(?<=-\sname:\s%s\s).*?requirements:.*?)(?=^\s*-\sname|^\s*test:|^\s*script:|^\s*extra:|^\s*about:|^outputs:|\Z)' % self.name()  # NOQA
+        return self.get_recipe_text(f, force_top_level=force_top_level)
 
     def extract_outputs_text(self):
-        return self.get_recipe_text(r'(^outputs:.*?)(^test:|^extra:|^about:|\Z)',
+        return self.get_recipe_text(r'(^outputs:.*?)(?=^test:|^extra:|^about:|\Z)',
                                     force_top_level=True)
 
     def extract_source_text(self):
         return self.get_recipe_text(
-            r'(\s*source:.*?)(^build:|^requirements:|^test:|^extra:|^about:|^outputs:|\Z)')
+            r'(\s*source:.*?)(?=^build:|^requirements:|^test:|^extra:|^about:|^outputs:|\Z)')
 
     def extract_package_and_build_text(self):
-        return self.get_recipe_text(r'(^.*?)(^requirements:|^test:|^extra:|^about:|^outputs:|\Z)')
+        return self.get_recipe_text(r'(^.*?)(?=^requirements:|^test:|^extra:|^about:|^outputs:|\Z)')
 
     def extract_single_output_text(self, output_name):
         # first, need to figure out which index in our list of outputs the name matches.
@@ -1520,15 +1547,21 @@ class MetaData(object):
         '''This is legacy syntax that we need to support for a while.  numpy x.x means
         "pin run as build" for numpy.  It was special-cased to only numpy.'''
         text = self.extract_requirements_text()
-        uses_xx = bool(re.search(r'numpy\s*x\.x', text))
-        if uses_xx:
-            log = utils.get_logger(__name__)
-            log.warn("Recipe at {path} uses numpy x.x.  This is deprecated as of conda-build 3.0, "
-                     "and will be removed in conda-build 4.0.  Please consider using variants with "
-                     "pin_run_as_build instead.  More info at "
-                     "https://conda.io/docs/building/variants.html#customizing-compatibility"
-                     .format(path=self.path))
+        uses_xx = bool(numpy_xx_re.search(text))
         return uses_xx
+
+    @property
+    def uses_numpy_pin_compatible_without_xx(self):
+        text = self.extract_requirements_text()
+        compatible_search = numpy_compatible_re.search(text)
+        max_pin_search = None
+        if compatible_search:
+            max_pin_search = numpy_compatible_x_re.search(text)
+        # compatible_search matches simply use of pin_compatible('numpy')
+        # max_pin_search quantifies the actual number of x's in the max_pin field.  The max_pin
+        #     field can be absent, which is equivalent to a single 'x'
+        return (bool(compatible_search),
+                max_pin_search.group(1).count('x') != 2 if max_pin_search else True)
 
     @property
     def uses_subpackage(self):
@@ -1537,10 +1570,12 @@ class MetaData(object):
         for out in outputs:
             if 'name' in out:
                 name_re = re.compile(r"^{}(\s|\Z|$)".format(out['name']))
-                in_reqs = any(name_re.match(req) for req in self.get_value('requirements/run'))
+                in_reqs = any(name_re.match(req) for req in self.get_depends_top_and_out('run'))
+                if in_reqs:
+                    break
         subpackage_pin = False
         if not in_reqs and self.meta_path:
-                data = self.extract_requirements_text()
+                data = self.extract_requirements_text(force_top_level=True)
                 if data:
                     subpackage_pin = re.search("{{\s*pin_subpackage\(.*\)\s*}}", data)
         return in_reqs or bool(subpackage_pin)
@@ -1734,7 +1769,8 @@ class MetaData(object):
             output_tuples = [(outputs, self)]
         else:
             all_output_metadata = OrderedDict()
-            for variant in (self.config.variants if hasattr(self.config, 'variants')
+            for variant in (self.config.variants if (hasattr(self.config, 'variants') and
+                                                     self.config.variants)
                             else [self.config.variant]):
                 om = self.copy()
                 om.config.variant = variant
@@ -1841,8 +1877,10 @@ class MetaData(object):
                                     self.extract_outputs_text())).rstrip()
 
         outputs = (yaml.safe_load(self._get_contents(permit_undefined_jinja=False,
-                                template_string=template_string)) or {}).get('outputs', [])
-        self.parse_until_resolved()
+                                                     template_string=template_string,
+                                                     skip_build_id=True)) or {}).get('outputs', [])
+        if not self.final:
+            self.parse_until_resolved()
         return get_output_dicts_from_metadata(self, outputs=outputs)
 
     def get_rendered_output(self, name):
@@ -1859,8 +1897,12 @@ class MetaData(object):
 
     def get_used_vars(self, force_top_level=False):
         global used_vars_cache
-        if (self.name(), force_top_level, self.config.subdir) in used_vars_cache:
-            used_vars = used_vars_cache[(self.name(), force_top_level, self.config.subdir)]
+        recipe_dir = self.path or self.meta.get('extra', {}).get('parent_recipe', {}).get('path')
+        if hasattr(self.config, 'used_vars'):
+            used_vars = self.config.used_vars
+        elif (self.name(), recipe_dir, force_top_level, self.config.subdir) in used_vars_cache:
+            used_vars = used_vars_cache[(self.name(), recipe_dir,
+                                         force_top_level, self.config.subdir)]
         else:
             meta_yaml_reqs = self._get_used_vars_meta_yaml(force_top_level=force_top_level)
             is_output = 'package:' not in self.get_recipe_text()
@@ -1876,13 +1918,14 @@ class MetaData(object):
                     any(plat != self.config.subdir for plat in
                         self.get_variants_as_dict_of_lists()['target_platform'])):
                 used_vars.add('target_platform')
-            used_vars_cache[(self.name(), force_top_level, self.config.subdir)] = used_vars
+            used_vars_cache[(self.name(), recipe_dir,
+                             force_top_level, self.config.subdir)] = used_vars
         return used_vars
 
     def _get_used_vars_meta_yaml(self, force_top_level=False):
         # recipe text is the best, because variables can be used anywhere in it.
         #   we promise to detect anything in meta.yaml, but not elsewhere.
-        is_output = 'package:' not in self.get_recipe_text()
+        is_output = (not self.path and self.meta.get('extra', {}).get('parent_recipe'))
         if is_output and not force_top_level:
             recipe_text = self.extract_single_output_text(self.name())
         else:
@@ -1955,3 +1998,18 @@ class MetaData(object):
     def clean(self):
         """This ensures that clean is called with the correct build id"""
         self.config.clean()
+
+    @property
+    def activate_build_script(self):
+        b = self.meta.get('build', {}) or {}
+        should_activate = (self.uses_new_style_compiler_activation or b.get('activate_in_script'))
+        return bool(self.config.activate and not self.name() == 'conda' and should_activate)
+
+    def get_top_level_recipe_without_outputs(self):
+        recipe_no_outputs = self.get_recipe_text(force_top_level=True).replace(
+            self.extract_outputs_text(), "")
+        top_no_outputs = {}
+        if recipe_no_outputs:
+            top_no_outputs = yaml.safe_load(self._get_contents(False,
+                                                                template_string=recipe_no_outputs))
+        return top_no_outputs or {}

@@ -87,6 +87,9 @@ DEFAULTS = [Setting('activate', True),
                 cc_conda_build.get('cache_dir')))) if cc_conda_build.get('cache_dir') else None),
             Setting('copy_test_source_files', True),
 
+            # should rendering cut out any skipped metadata?
+            Setting('trim_skip', True),
+
             # Disable the overlinking test for this package. This test checks that transitive DSOs
             # are not referenced by DSOs in the package being built. When this happens something
             # has gone wrong with:
@@ -94,7 +97,7 @@ DEFAULTS = [Setting('activate', True),
             #    (GNU ld: -as-needed, Apple ld64: -dead_strip_dylibs -no_implicit_dylibs)
             # 2. A missing package in reqs/run (maybe that package is missing run_exports?)
             # 3. A missing (or broken) CDT package in reqs/build or (on systems without CDTs)
-            # 4. .. a missing value in the (to be implemented) system library whitelist
+            # 4. .. a missing value in the hard-coded but metadata-augmentable library whitelist
             # It is important that packages do not suffer from 2 because uninstalling that missing
             # package leads to an inability to run this package.
             #
@@ -116,6 +119,9 @@ DEFAULTS = [Setting('activate', True),
 
             # variants
             Setting('variant_config_files', []),
+            # this file precludes usage of any system-wide or cwd config files.  Config files in
+            #    recipes are still respected, and they override this file.
+            Setting('exclusive_config_file', None),
             Setting('ignore_system_variants', False),
             Setting('hash_length', 7),
 
@@ -153,6 +159,9 @@ DEFAULTS = [Setting('activate', True),
             # involving compilers (not just python) will still require recipe modification to have
             # distinct host and build sections, but simple python stuff should work without.
             Setting('merge_build_host', False),
+
+            # path to output build statistics to
+            Setting('stats_file', None),
             ]
 
 
