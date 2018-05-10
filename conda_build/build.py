@@ -8,6 +8,7 @@ import fnmatch
 from glob import glob
 import io
 import json
+import libarchive
 import os
 from os.path import isdir, isfile, islink, join, dirname
 import random
@@ -50,7 +51,7 @@ from .conda_interface import MatchSpec
 from .conda_interface import reset_context
 from .conda_interface import context
 from .conda_interface import UnsatisfiableError
-from .utils import env_var
+from .utils import env_var, tmp_chdir
 
 from conda_build import __version__
 from conda_build import environ, source, tarcheck, utils
@@ -964,7 +965,6 @@ def bundle_conda(output, metadata, env, stats, **kw):
 
     with TemporaryDirectory() as tmp:
         tmp_path = os.path.join(tmp, os.path.basename(output_filename))
-        t = tarfile.open(tmp_path, 'w:bz2')
 
         def order(f):
             # we don't care about empty files so send them back via 100000
@@ -976,9 +976,9 @@ def bundle_conda(output, metadata, env, stats, **kw):
         # add files in order of a) in info directory, b) increasing size so
         # we can access small manifest or json files without decompressing
         # possible large binary or data files
-        for f in sorted(files, key=order):
-            t.add(join(metadata.config.host_prefix, f), f)
-        t.close()
+        with tmp_chdir(metadata.config.host_prefix):
+            with libarchive.file_writer(tmp_path, 'ustar', 'bzip2') as archive:
+                    archive.add_files(*list(f for f in sorted(files, key=order)))
 
         # we're done building, perform some checks
         tarcheck.check_all(tmp_path, metadata.config)
