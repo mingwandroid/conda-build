@@ -882,7 +882,7 @@ def bundle_conda(output, metadata, env, stats, **kw):
                       metadata.meta.get('extra', {}).get('parent_recipe', {}).get('path', ''))
         utils.copy_into(os.path.join(recipe_dir, output['script']), dest_file)
         if activate_script:
-            _write_activation_text(dest_file, metadata)
+            _write_activation_text(dest_file, env_output, metadata)
 
         bundle_stats = {}
         utils.check_call_env(interpreter_and_args + [dest_file],
@@ -1086,7 +1086,10 @@ bundlers = {
 }
 
 
-def _write_sh_activation_text(file_handle, m):
+def _write_sh_activation_text(file_handle, env, m):
+    for k, v in env.items():
+        if v:
+            file_handle.write('export {0}="{1}"\n'.format(k, v))
     cygpath_prefix = "$(cygpath -u " if utils.on_win else ""
     cygpath_suffix = " )" if utils.on_win else ""
     activate_path = ''.join((cygpath_prefix,
@@ -1148,14 +1151,14 @@ def _write_sh_activation_text(file_handle, m):
         open(history_file, 'a').close()
 
 
-def _write_activation_text(script_path, m):
+def _write_activation_text(script_path, env, m):
     with open(script_path, 'r+') as fh:
         data = fh.read()
         fh.seek(0)
         if os.path.splitext(script_path)[1].lower() == ".bat":
-            windows._write_bat_activation_text(fh, m)
+            windows._write_bat_activation_text(fh, env, m)
         elif os.path.splitext(script_path)[1].lower() == ".sh":
-            _write_sh_activation_text(fh, m)
+            _write_sh_activation_text(fh, env, m)
         else:
             log = utils.get_logger(__name__)
             log.warn("not adding activation to {} - I don't know how to do so for "
@@ -1398,12 +1401,8 @@ def build(m, stats, post=None, need_source_download=True, need_reparse_in_env=Fa
 
                     work_file = join(m.config.work_dir, 'conda_build.sh')
                     with open(work_file, 'w') as bf:
-                        for k, v in env.items():
-                            if v:
-                                bf.write('export {0}="{1}"\n'.format(k, v))
-
                         if m.config.activate and not m.name() == 'conda':
-                            _write_sh_activation_text(bf, m)
+                            _write_sh_activation_text(bf, env, m)
                         if script:
                                 bf.write(script)
                         if isfile(build_file) and not script:

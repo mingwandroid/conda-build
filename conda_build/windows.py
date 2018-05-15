@@ -206,7 +206,17 @@ def msvc_env_cmd(bits, config, override=None):
     return '\n'.join(msvc_env_lines) + '\n'
 
 
-def _write_bat_activation_text(file_handle, m):
+def _write_bat_activation_text(file_handle, env, m):
+    for key, value in env.items():
+        if value:
+            file_handle.write('set "{key}={value}"\n'.format(key=key, value=value))
+    if not m.uses_new_style_compiler_activation:
+        file_handle.write(msvc_env_cmd(bits=m.config.host_arch, config=m.config,
+                                       override=m.get_value('build/msvc_compiler', None)))
+    # Reset echo on, because MSVC scripts might have turned it off
+    file_handle.write('@echo on\n')
+    file_handle.write('set "INCLUDE={};%INCLUDE%"\n'.format(env["LIBRARY_INC"]))
+    file_handle.write('set "LIB={};%LIB%"\n'.format(env["LIBRARY_LIB"]))
     if conda_46:
         file_handle.write('call "{conda_root}\\condacmd\\conda_hook.bat"\n'.format(
             conda_root=root_script_dir,
@@ -278,18 +288,8 @@ def build(m, bld_bat, stats):
         with open(join(src_dir, 'bld.bat'), 'w') as fo:
             # more debuggable with echo on
             fo.write('@echo on\n')
-            for key, value in env.items():
-                if value:
-                    fo.write('set "{key}={value}"\n'.format(key=key, value=value))
-            if not m.uses_new_style_compiler_activation:
-                fo.write(msvc_env_cmd(bits=m.config.host_arch, config=m.config,
-                                    override=m.get_value('build/msvc_compiler', None)))
-            # Reset echo on, because MSVC scripts might have turned it off
-            fo.write('@echo on\n')
-            fo.write('set "INCLUDE={};%INCLUDE%"\n'.format(env["LIBRARY_INC"]))
-            fo.write('set "LIB={};%LIB%"\n'.format(env["LIBRARY_LIB"]))
             if m.config.activate and m.name() != 'conda':
-                _write_bat_activation_text(fo, m)
+                _write_bat_activation_text(fo, env, m)
             fo.write("REM ===== end generated header =====\n")
             fo.write(data)
 
