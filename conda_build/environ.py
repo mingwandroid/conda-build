@@ -398,31 +398,33 @@ def meta_vars(meta, skip_build_id=False):
         # On Windows, subprocess env can't handle unicode.
         git_dir = git_dir.encode(sys.getfilesystemencoding() or 'utf-8')
 
-    git_exe = external.find_executable('git', meta.config.build_prefix)
-    if git_exe and os.path.exists(git_dir):
-        # We set all 'source' metavars using the FIRST source entry in meta.yaml.
-        git_url = meta.get_value('source/0/git_url')
+    git_exe = None
+    if os.path.exists(git_dir):
+        git_exe = external.find_executable('git', meta.config.build_prefix)
+        if git_exe:
+            # We set all 'source' metavars using the FIRST source entry in meta.yaml.
+            git_url = meta.get_value('source/0/git_url')
 
-        if os.path.exists(git_url):
-            if sys.platform == 'win32':
-                git_url = utils.convert_unix_path_to_win(git_url)
-            # If git_url is a relative path instead of a url, convert it to an abspath
-            git_url = normpath(join(meta.path, git_url))
+            if os.path.exists(git_url):
+                if sys.platform == 'win32':
+                    git_url = utils.convert_unix_path_to_win(git_url)
+                # If git_url is a relative path instead of a url, convert it to an abspath
+                git_url = normpath(join(meta.path, git_url))
 
-        _x = False
+            _x = False
 
-        if git_url:
-            _x = verify_git_repo(git_exe,
-                                 git_dir,
-                                 git_url,
-                                 meta.config.git_commits_since_tag,
-                                 meta.config.debug,
-                                 meta.get_value('source/0/git_rev', 'HEAD'))
+            if git_url:
+                _x = verify_git_repo(git_exe,
+                                     git_dir,
+                                     git_url,
+                                     meta.config.git_commits_since_tag,
+                                     meta.config.debug,
+                                     meta.get_value('source/0/git_rev', 'HEAD'))
 
-        if _x or meta.get_value('source/0/path'):
-            d.update(get_git_info(git_exe, git_dir, meta.config.debug))
+            if _x or meta.get_value('source/0/path'):
+                d.update(get_git_info(git_exe, git_dir, meta.config.debug))
 
-    elif external.find_executable('hg', meta.config.build_prefix) and os.path.exists(hg_dir):
+    elif os.path.exists(hg_dir) and external.find_executable('hg', meta.config.build_prefix):
         d.update(get_hg_build_info(hg_dir))
 
     # use `get_value` to prevent early exit while name is still unresolved during rendering
