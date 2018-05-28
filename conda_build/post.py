@@ -634,7 +634,7 @@ def post_build(m, files, build_python):
     binary_relocation = m.binary_relocation()
     if not binary_relocation:
         print("Skipping binary relocation logic")
-    osx_is_app = bool(m.get_value('build/osx_is_app', False)) and sys.platform == 'darwin'
+    osx_is_app = sys.platform == 'darwin' and bool(m.get_value('build/osx_is_app', False))
 
     check_symlinks(files, m.config.host_prefix, m.config.croot)
     prefix_files = utils.prefix_files(m.config.host_prefix)
