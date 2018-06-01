@@ -26,11 +26,21 @@ def codefile_type(filename, skip_symlinks=True):
     json_data = json.loads(lief.to_json(binary))
     if json_data:
         # print(json.dumps(json_data, sort_keys = True, indent = 4))
-        if json_data['format'] == 'MACHO':
+        if 'format' in json_data and json_data['format'] == 'MACHO':
             return 'machofile'
         else:
-            return 'elffile'
+            if 'header' in json_data and json_data['header']['file_type'] == 'DYNAMIC':
+                return 'elffile'
+            else:
+                # Just to debug what else comes out.
+                print(json_data['header']['file_type'])
+                return 'elffile'+json_data['header']['file_type']
     return None
+
+# lief cannot handle files it doesn't know about gracefully, so for now,
+# use pyldd for this bit.
+from .pyldd import codefile_type as codefile_type_pyldd
+codefile_type = codefile_type_pyldd
 
 def _trim_sysroot(sysroot):
     while sysroot.endswith('/') or sysroot.endswith('\\'):
@@ -89,11 +99,7 @@ def inspect_linkages(filename, resolve_filenames=True, recurse=True, sysroot='',
     # Future lief has this:
     # json_data = json.loads(lief.to_json_from_abstract(binary))
     json_data = json.loads(lief.to_json(binary))
-    if json_data:
-        if json_data['format'] == 'MACHO':
-            return []
-        return [json_data['format']]
-    return []
+    return binary.libraries
 
 
     already_seen = set()
@@ -124,10 +130,9 @@ def get_runpaths(filename, arch='native'):
     # json_data = json.loads(lief.to_json_from_abstract(binary))
     json_data = json.loads(lief.to_json(binary))
     if json_data:
-        if json_data['format'] == 'MACHO':
+        if 'format' in json_data and json_data['format'] == 'MACHO':
             return []
-        return [json_data['format']]
-    return []
+    return [de.runpath for de in binary.dynamic_entries if de.tag == lief.ELF.DYNAMIC_TAGS.RUNPATH]
 
 
 def get_imports(filename, arch='native'):
@@ -153,7 +158,11 @@ def get_exports(filename, arch='native'):
         # g: global (exported) only
         # U: not undefined
         # j is name only
-        out, _ = subprocess.Popen(['nm', '-PgUj', filename], shell=False,
+        if sys.platform == 'darwin':
+            flags = '-PgUj'
+        else:
+            flags = '-P'
+        out, _ = subprocess.Popen(['nm', flags, filename], shell=False,
                          stdout=subprocess.PIPE).communicate()
         results = out.decode('utf-8').splitlines()
         exports = [r.split(' ')[0] for r in results if (' T ') in r]
@@ -173,6 +182,8 @@ def get_symbols(filename, arch='native'):
     json_data = json.loads(lief.to_json(binary))
     if 'symbols' in json_data:
         return json_data['symbols']
+    elif 'static_symbols' in json_data:
+        return json_data['static_symbols']
     return []
 
 

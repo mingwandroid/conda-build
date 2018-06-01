@@ -453,12 +453,16 @@ def check_overlinking(m, files):
             for file in filez:
                 fp = os.path.join(subdir, file)
                 rp = os.path.relpath(fp, prefix)
-                prefix_owners[rp] = list(which_package(rp, prefix))
+                prefix_owners[rp] = utils.ensure_list(which_package(rp, prefix))
                 prefix_owners[rp] = [pkg.quad[0] for pkg in prefix_owners[rp]]
                 if len(prefix_owners[rp]):
                     if rp.endswith('.so') or rp.endswith('.dylib') or rp.endswith('.dll'):
                         contains_dsos[prefix_owners[rp][0]] = True
                     elif rp.endswith('.a') or rp.endswith('.lib'):
+                        if 'sysroot' in fp:
+                            if prefix_owners[rp][0] == 'gcc_impl_linux-64':
+                                continue
+                            print("sysroot in {}, owner is {}".format(fp,prefix_owners[rp][0]))
                         contains_static_libs[prefix_owners[rp][0]] = True
                         static_lib_exps[rp] = set(get_exports(fp))
                 # if len(host_prefix_owners[rp]):
@@ -521,12 +525,11 @@ def check_overlinking(m, files):
         err_prelude = "  ERROR ({},{})".format(pkg_name, f)
         info_prelude = "   INFO ({},{})".format(pkg_name, f)
         msg_prelude = err_prelude if m.config.error_overlinking else warn_prelude
-
         try:
             runpaths = get_runpaths(path)
         except:
             print_msg(errors, '{}: pyldd.py failed to process'.format(warn_prelude))
-            continue
+            raise
         if len(runpaths):
             print_msg(errors, '{}: runpaths {} found in {}'.format(msg_prelude,
                                                                    runpaths,
@@ -536,17 +539,19 @@ def check_overlinking(m, files):
         exps = get_exports(path, None)
         syms = set([s['name'] for s in get_symbols(path, None)])
         for static_lib_name, static_lib_exp in iteritems(static_lib_exps):
-            isect = static_lib_exp.intersection(syms)
-            perc_used = (len(isect) * 100.0) / len(static_lib_exp)
-            if perc_used > 0.0:
-                if prefix_owners[static_lib_name][0] not in ignore_list:
-                    static_prelude = err_prelude if m.config.error_static_linking else warn_prelude
-                else:
-                    static_prelude = info_prelude
-                print_msg(errors, "{}: VENDORING: {}% of the functions from {} used: {}".format(static_prelude,
-                                                                                                perc_used,
-                                                                                                static_lib_name,
-                                                                                                sorted(list(isect))))
+            if len(static_lib_exp):
+                isect = static_lib_exp.intersection(syms)
+                perc_used = float(len(isect)) / float(len(static_lib_exp))
+                if perc_used > 0.0:
+                    if prefix_owners[static_lib_name][0] not in ignore_list:
+                        static_prelude = err_prelude if m.config.error_static_linking else warn_prelude
+                    else:
+                        static_prelude = info_prelude
+                    print_msg(errors, "{pre}: VENDORING: {perc:.2%} of *entry-point symbols* from {ln} used: {l}".format(
+                        pre=static_prelude,
+                        perc=perc_used,
+                        ln=static_lib_name,
+                        l=sorted(list(isect))))
         for needed_dso in needed:
             if needed_dso.startswith(m.config.host_prefix):
                 in_prefix_dso = os.path.normpath(needed_dso.replace(m.config.host_prefix + '/', ''))
@@ -636,13 +641,18 @@ def check_overlinking(m, files):
                 else:
                     print_msg(errors, "{}: did not find - or even know where to look for: {}".
                                       format(msg_prelude, needed_dso))
+
     if len(errors):
         sys.exit(1)
 
 
 def post_process_shared_lib(m, f, files):
     path = os.path.join(m.config.host_prefix, f)
-    codefile_t = codefile_type(path)
+    try:
+        codefile_t = codefile_type(path)
+    except:
+        codefile_t = None
+        pass
     if not codefile_t:
         return
     if sys.platform.startswith('linux') and codefile_t == 'elffile':

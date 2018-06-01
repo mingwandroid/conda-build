@@ -8,9 +8,10 @@ if [[ ${target_platform} =~ osx-64 ]]; then
 else
   TO_STATIC=-Wl,-Bstatic
   TO_DYNAMIC=-Wl,-Bdynamic
-  LIBNAME=-lz.a
+  LIBNAME=${BUILD_PREFIX}/lib/libz.a
 fi
+INCLUDES=-I${BUILD_PREFIX}/include
 
 [[ -d ${PREFIX}/bin ]] || mkdir -p ${PREFIX}/bin
 
-${CC} main.c -o ${PREFIX}/bin/main ${TO_STATIC} ${LIBNAME} ${TO_DYNAMIC}
+${CC} main.c -o ${PREFIX}/bin/main ${CFLAGS} ${INCLUDES} ${TO_STATIC} ${LIBNAME} ${TO_DYNAMIC}
