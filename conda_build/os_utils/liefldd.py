@@ -92,34 +92,18 @@ def _inspect_linkages_this(filename, sysroot='', arch='native'):
 
 
 # TODO :: Consider returning a tree structure or a dict when recurse is True?
-def inspect_linkages(filename, resolve_filenames=True, recurse=True, sysroot='', arch='native'):
+def inspect_linkages_lief(filename, resolve_filenames=True, recurse=True, sysroot='', arch='native'):
     if not os.path.exists(filename):
         return []
     binary = lief.parse(filename)
-    # Future lief has this:
-    # json_data = json.loads(lief.to_json_from_abstract(binary))
-    json_data = json.loads(lief.to_json(binary))
     return binary.libraries
 
 
-    already_seen = set()
-    todo = set([filename])
-    done = set()
-    results = set()
-    while todo != done:
-        filename = next(iter(todo - done))
-        uniqueness_key, these_orig, these_resolved = _inspect_linkages_this(
-            filename, sysroot=sysroot, arch=arch)
-        if uniqueness_key not in already_seen:
-            if resolve_filenames:
-                results.update(these_resolved)
-            else:
-                results.update(these_orig)
-            if recurse:
-                todo.update(these_resolved)
-            already_seen.add(uniqueness_key)
-        done.add(filename)
-    return results
+from .pyldd import inspect_linkages as inspect_linkages_pyldd
+def inspect_linkages(filename, resolve_filenames=True, recurse=True, sysroot='', arch='native'):
+    result_lief = inspect_linkages_lief(filename, resolve_filenames=resolve_filenames, recurse=recurse, sysroot=sysroot, arch=arch)
+    result_pyldd = inspect_linkages_pyldd(filename, resolve_filenames=resolve_filenames, recurse=recurse, sysroot=sysroot, arch=arch)
+    return result_pyldd
 
 
 def get_runpaths(filename, arch='native'):

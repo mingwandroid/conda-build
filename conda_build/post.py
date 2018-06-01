@@ -538,6 +538,11 @@ def check_overlinking(m, files):
         imps = get_imports(path, None)
         exps = get_exports(path, None)
         syms = set([s['name'] for s in get_symbols(path, None)])
+        if 'main' in syms:
+            syms.remove('main')
+        if '_main' in syms:
+            syms.remove('_main')
+        # Need to remove symbols that are found in any DSOs from syms.
         for static_lib_name, static_lib_exp in iteritems(static_lib_exps):
             if len(static_lib_exp):
                 isect = static_lib_exp.intersection(syms)
@@ -557,8 +562,11 @@ def check_overlinking(m, files):
                 in_prefix_dso = os.path.normpath(needed_dso.replace(m.config.host_prefix + '/', ''))
                 n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                 and_also = " (and also in this package)" if in_prefix_dso in files else ""
+#                pkgs = prefix_owners[in_prefix_dso]
+#                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
                 pkgs = prefix_owners[in_prefix_dso]
-                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
+                print(pkgs)
+                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg in run_reqs]
                 if len(in_pkgs_in_run_reqs) == 1 and in_pkgs_in_run_reqs[0]:
                     if in_pkgs_in_run_reqs[0] in usage_of_run_req:
                         usage_of_run_req[in_pkgs_in_run_reqs[0]].append(f)
