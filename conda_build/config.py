@@ -106,6 +106,11 @@ DEFAULTS = [Setting('activate', True),
             Setting('error_overlinking', cc_conda_build.get('error_overlinking',
                                                            'false').lower() == 'true'),
 
+            # Not sure whether to call this error_static_linking or error_vendoring, also shouldn't
+            # we figure a way to augment the final rendered metadata with this info? record_vendoring?
+            Setting('error_static_linking', cc_conda_build.get('error_static_linking',
+                                                               'true').lower() == 'true'),
+
             Setting('index', None),
             # support legacy recipes where only build is specified and expected to be the
             #    folder that packaging is done on

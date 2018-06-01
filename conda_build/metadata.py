@@ -930,6 +930,11 @@ class MetaData(object):
 
             if self.meta.get('build', {}).get('error_overlinking', False):
                 self.config.error_overlinking = self.meta['build']['error_overlinking']
+
+            if self.meta.get('build', {}).get('error_static_linking', False):
+                self.config.error_overlinking = self.meta['build']['error_static_linking']
+
+
         except:
             raise
         finally:

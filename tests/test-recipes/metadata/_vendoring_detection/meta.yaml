@@ -1,0 +1,21 @@
+{% set version = "1" %}
+
+package:
+  name: vendors-zlib
+  version: 1
+
+source:
+  path: .
+
+build:
+  number: 0
+  skip: True  # [win]
+  # We will report this as unneeded dependency, unless you explicitly
+  # declare it here
+  # ignore_run_exports:
+  #   - zlib
+
+requirements:
+  build:
+    - {{ compiler('c') }}
+    - zlib

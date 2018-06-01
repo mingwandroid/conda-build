@@ -19,6 +19,8 @@ except ImportError:
     readlink = False
 
 from conda_build.os_utils import external
+from conda_build.conda_interface import is_linked
+from conda_build.conda_interface import iteritems
 from conda_build.conda_interface import lchmod
 from conda_build.conda_interface import walk_prefix
 from conda_build.conda_interface import md5_file
@@ -26,8 +28,10 @@ from conda_build.conda_interface import PY3
 from conda_build.conda_interface import TemporaryDirectory
 
 from conda_build import utils
-from conda_build.os_utils.pyldd import codefile_type, inspect_linkages, get_runpaths
-from conda_build.inspect_pkg import which_package
+#from conda_build.os_utils.pyldd import codefile_type, inspect_linkages, get_runpaths
+from conda_build.os_utils.liefldd import (codefile_type, inspect_linkages, get_runpaths,
+    get_imports, get_exports, get_symbols)
+from conda_build.inspect_pkg import dist_files, which_package
 
 if sys.platform == 'darwin':
     from conda_build.os_utils import macho
@@ -431,10 +435,38 @@ def check_overlinking(m, files):
 
     errors = []
 
+    ignore_list = utils.ensure_list(m.get_value('build/ignore_run_exports'))
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
+    # For checking if static linking has happened
+    build_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('build', [])]
     # sysroots and whitelists are similar, but the subtle distinctions are important.
     sysroots = glob(os.path.join(m.config.build_prefix, '**', 'sysroot'))
     whitelist = []
+
+    # Form a mapping of file => package
+    prefix_owners = {}
+    contains_dsos = {}
+    contains_static_libs = {}
+    static_lib_exps = {}
+    for prefix in (m.config.host_prefix, m.config.build_prefix):
+        for subdir, dirs, filez in os.walk(prefix):
+            for file in filez:
+                fp = os.path.join(subdir, file)
+                rp = os.path.relpath(fp, prefix)
+                prefix_owners[rp] = list(which_package(rp, prefix))
+                prefix_owners[rp] = [pkg.quad[0] for pkg in prefix_owners[rp]]
+                if len(prefix_owners[rp]):
+                    if rp.endswith('.so') or rp.endswith('.dylib') or rp.endswith('.dll'):
+                        contains_dsos[prefix_owners[rp][0]] = True
+                    elif rp.endswith('.a') or rp.endswith('.lib'):
+                        contains_static_libs[prefix_owners[rp][0]] = True
+                        static_lib_exps[rp] = set(get_exports(fp))
+                # if len(host_prefix_owners[rp]):
+                #     meta = is_linked(m.config.host_prefix, host_prefix_owners[rp][0])
+                #     if meta:
+                #         meta['paths']
+                #     print(df)
+
     if 'target_platform' in m.config.variant and m.config.variant['target_platform'] == 'osx-64':
         if not len(sysroots):
             sysroots = ['/usr/lib', '/opt/X11', '/System/Library/Frameworks']
@@ -480,6 +512,7 @@ def check_overlinking(m, files):
                      '/System/Library/Frameworks/SystemConfiguration.framework/*',
                      '/System/Library/Frameworks/WebKit.framework/*']
     whitelist += m.meta.get('build', {}).get('missing_dso_whitelist', [])
+    usage_of_run_req = dict()
     for f in files:
         path = os.path.join(m.config.host_prefix, f)
         if not codefile_type(path):
@@ -499,13 +532,33 @@ def check_overlinking(m, files):
                                                                    runpaths,
                                                                    path))
         needed = inspect_linkages(path, resolve_filenames=True, recurse=False)
+        imps = get_imports(path, None)
+        exps = get_exports(path, None)
+        syms = set([s['name'] for s in get_symbols(path, None)])
+        for static_lib_name, static_lib_exp in iteritems(static_lib_exps):
+            isect = static_lib_exp.intersection(syms)
+            perc_used = (len(isect) * 100.0) / len(static_lib_exp)
+            if perc_used > 0.0:
+                if prefix_owners[static_lib_name][0] not in ignore_list:
+                    static_prelude = err_prelude if m.config.error_static_linking else warn_prelude
+                else:
+                    static_prelude = info_prelude
+                print_msg(errors, "{}: VENDORING: {}% of the functions from {} used: {}".format(static_prelude,
+                                                                                                perc_used,
+                                                                                                static_lib_name,
+                                                                                                sorted(list(isect))))
         for needed_dso in needed:
             if needed_dso.startswith(m.config.host_prefix):
                 in_prefix_dso = os.path.normpath(needed_dso.replace(m.config.host_prefix + '/', ''))
                 n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                 and_also = " (and also in this package)" if in_prefix_dso in files else ""
-                pkgs = list(which_package(in_prefix_dso, m.config.host_prefix))
+                pkgs = prefix_owners[in_prefix_dso]
                 in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
+                if len(in_pkgs_in_run_reqs) == 1 and in_pkgs_in_run_reqs[0]:
+                    if in_pkgs_in_run_reqs[0] in usage_of_run_req:
+                        usage_of_run_req[in_pkgs_in_run_reqs[0]].append(f)
+                    else:
+                        usage_of_run_req[in_pkgs_in_run_reqs[0]] = [f]
                 in_whitelist = any([glob2.fnmatch.fnmatch(in_prefix_dso, w) for w in whitelist])
                 if in_whitelist:
                     print_msg(errors, '{}: {} found in the whitelist'.

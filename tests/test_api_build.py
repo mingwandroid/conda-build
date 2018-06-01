@@ -1233,6 +1233,7 @@ def test_provides_features_metadata(testing_config):
 def test_overlinking_detection(testing_config):
     testing_config.activate = True
     testing_config.error_overlinking = True
+    testing_config.error_static_linking = True
     recipe = os.path.join(metadata_dir, '_overlinkage_detection')
     dest_file = os.path.join(recipe, 'build.sh')
     copy_into(os.path.join(recipe, 'build_scripts', 'default.sh'), dest_file)
