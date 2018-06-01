@@ -106,10 +106,12 @@ def inspect_linkages(filename, resolve_filenames=True, recurse=True, sysroot='',
     return result_pyldd
 
 
-def get_runpaths(filename, arch='native'):
+def get_runpaths_lief(filename, arch='native'):
     if not os.path.exists(filename):
         return []
+    print("get_runpaths filepath {}".format(filename))
     binary = lief.parse(filename)
+    print("get_runpaths binary {}".format(binary))
     # Future lief has this:
     # json_data = json.loads(lief.to_json_from_abstract(binary))
     json_data = json.loads(lief.to_json(binary))
@@ -117,6 +119,15 @@ def get_runpaths(filename, arch='native'):
         if 'format' in json_data and json_data['format'] == 'MACHO':
             return []
     return [de.runpath for de in binary.dynamic_entries if de.tag == lief.ELF.DYNAMIC_TAGS.RUNPATH]
+
+from .pyldd import get_runpaths as get_runpaths_pyldd
+def get_runpaths(filename, arch='native'):
+    res_pyldd = get_runpaths_pyldd(filename, arch)
+    if sys.platform != 'darwin':
+        res_lief = get_runpaths_lief(filename, arch)
+        if set(res_pyldd) != set(res_lief):
+            print("get_runpaths disagrees: pyldd: {} vs lief: {}".format(set(res_pyldd), set(res_lief)))
+    return res_pyldd
 
 
 def get_imports(filename, arch='native'):
