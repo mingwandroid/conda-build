@@ -261,6 +261,18 @@ different sets of packages."""
         default=cc_conda_build.get('error_overlinking', 'false').lower() == 'true',
     )
     p.add_argument(
+        "--error-static-linking", dest='error_static_linking', action="store_true",
+        help=("Enable errors when static libraries are linked but have not been declared in "
+              "build/ignore_run_exports"),
+        default=cc_conda_build.get('error_static_linking', 'false').lower() == 'true',
+    )
+    p.add_argument(
+        "--no-error-static-linking", dest='error_static_linking', action="store_false",
+        help=("Disable eerrors when static libraries are linked but have not been declared in "
+              "build/ignore_run_exports"),
+        default=cc_conda_build.get('error_static_linking', 'false').lower() == 'true',
+    )
+    p.add_argument(
         "--long-test-prefix", default=True, action="store_false",
         help=("Use a long prefix for the test prefix, as well as the build prefix.  Affects only "
               "Linux and Mac.  Prefix length matches the --prefix-length flag.  This is on by "
