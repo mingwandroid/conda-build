@@ -109,9 +109,9 @@ def inspect_linkages(filename, resolve_filenames=True, recurse=True, sysroot='',
 def get_runpaths_lief(filename, arch='native'):
     if not os.path.exists(filename):
         return []
-    print("get_runpaths filepath {}".format(filename))
+    # print("get_runpaths filepath {}".format(filename))
     binary = lief.parse(filename)
-    print("get_runpaths binary {}".format(binary))
+    # print("get_runpaths binary {}".format(binary))
     # Future lief has this:
     # json_data = json.loads(lief.to_json_from_abstract(binary))
     json_data = json.loads(lief.to_json(binary))
