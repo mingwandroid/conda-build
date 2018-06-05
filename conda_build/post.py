@@ -585,16 +585,16 @@ def check_overlinking(m, files):
                 elif len(in_pkgs_in_run_reqs) == 0 and len(pkgs) > 0:
                     print_msg(errors, '{}: {} found in {}{}'.format(msg_prelude,
                                                                     n_dso_p,
-                                                                    [p.quad[0] for p in pkgs],
+                                                                    [p for p in pkgs],
                                                                     and_also))
                     print_msg(errors, '{}: .. but {} not in reqs/run, i.e. it is overlinked'
                                       ' (likely) or a missing dependency (less likely)'.
-                                      format(msg_prelude, [p.quad[0] for p in pkgs]))
+                                      format(msg_prelude, [p for p in pkgs]))
                 elif len(in_pkgs_in_run_reqs) > 1:
                     print_msg(errors, '{}: {} found in multiple packages in run/reqs: {}{}'
                                       .format(warn_prelude,
                                               in_prefix_dso,
-                                              [p.quad[0] for p in in_pkgs_in_run_reqs],
+                                              [p for p in in_pkgs_in_run_reqs],
                                               and_also))
                 else:
                     if in_prefix_dso not in files:
