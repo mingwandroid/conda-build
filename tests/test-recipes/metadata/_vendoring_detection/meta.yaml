@@ -14,6 +14,7 @@ build:
   # declare it here
   # ignore_run_exports:
   #   - zlib
+  activate_in_script: True
 
 requirements:
   build:

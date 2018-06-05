@@ -1244,6 +1244,14 @@ def test_overlinking_detection(testing_config):
     rm_rf(dest_file)
 
 
+def test_vendoring_detection(testing_config):
+    testing_config.error_static_linking = True
+    testing_config.activate = True
+    recipe = os.path.join(metadata_dir, '_vendoring_detection')
+    with pytest.raises(CondaBuildException):
+        api.build(recipe, config=testing_config)
+
+
 def test_empty_package_with_python_in_build_and_host_barfs(testing_config):
     recipe = os.path.join(metadata_dir, '_empty_pkg_with_python_build_host')
     with pytest.raises(CondaBuildException):
