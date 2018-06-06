@@ -521,6 +521,13 @@ def write_link_json(m):
             fh.write(json.dumps(package_metadata, sort_keys=True, indent=2, separators=(',', ': ')))
 
 
+def write_imports_json(m):
+    imports_metadata = OrderedDict(m.imports)
+    imports_metadata["imports_metadata_version"] = 1
+    with open(os.path.join(m.config.info_dir, "imports.json"), 'w') as fh:
+        fh.write(json.dumps(imports_metadata, sort_keys=True, indent=2, separators=(',', ': ')))
+
+
 def write_about_json(m):
     with open(join(m.config.info_dir, 'about.json'), 'w') as fo:
         d = {}
@@ -632,6 +639,7 @@ def create_info_files(m, files, prefix):
     write_about_json(m)
     write_link_json(m)
     write_run_exports(m)
+    write_imports_json(m)
 
     copy_recipe(m)
     copy_readme(m)

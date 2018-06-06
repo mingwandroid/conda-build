@@ -157,9 +157,7 @@ def get_imports(filename, arch='native'):
         if not os.path.exists(filename):
             return []
         binary = lief.parse(filename)
-        json_data = json.loads(lief.to_json(binary))
-        if 'imported_functions' in json_data:
-            return json_data['imported_functions']
+        return binary.imported_functions
     except:
         print('WARNING: liefldd: failed get_imports({})',format(filename))
     return []
@@ -190,12 +188,23 @@ def get_exports(filename, arch='native'):
     else:
         try:
             binary = lief.parse(filename)
-            json_data = json.loads(lief.to_json(binary))
-            if 'exported_functions' in json_data:
-                return json_data['exported_functions']
+            return binary.exported_functions
         except:
             print('WARNING: liefldd: failed get_exports({})',format(filename))
         return []
+
+
+def get_relocations(filename, arch='native'):
+    if not os.path.exists(filename):
+        return []
+    try:
+        binary = lief.parse(filename)
+        if len(binary.relocations):
+            return binary.relocations
+    except:
+        print('WARNING: liefldd: failed get_relocations({})',format(filename))
+
+    return []
 
 
 def get_symbols(filename, arch='native'):
@@ -203,11 +212,10 @@ def get_symbols(filename, arch='native'):
         return []
     try:
         binary = lief.parse(filename)
-        json_data = json.loads(lief.to_json(binary))
-        if 'symbols' in json_data:
-            return json_data['symbols']
-        elif 'static_symbols' in json_data:
-            return json_data['static_symbols']
+        if len(binary.symbols):
+            return binary.symbols
+        elif len(binary.static_symbols):
+            return binary.static_symbols
     except:
         print('WARNING: liefldd: failed get_symbols({})',format(filename))
 

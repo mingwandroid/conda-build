@@ -30,7 +30,7 @@ from conda_build.conda_interface import TemporaryDirectory
 from conda_build import utils
 #from conda_build.os_utils.pyldd import codefile_type, inspect_linkages, get_runpaths
 from conda_build.os_utils.liefldd import (codefile_type, inspect_linkages, get_runpaths,
-    get_imports, get_exports, get_symbols)
+    get_imports, get_exports, get_relocations, get_symbols)
 from conda_build.inspect_pkg import dist_files, which_package
 
 if sys.platform == 'darwin':
@@ -435,7 +435,15 @@ def check_overlinking(m, files):
 
     errors = []
 
+    vendoring_record = dict()
+    pkg_vendoring_name = m.get_value('package/name')
+    pkg_vendoring_version = m.get_value('package/version')
+    pkg_vendoring_build_str = m.build_id()
+    pkg_vendoring_key = '-'.join([pkg_vendoring_name, pkg_vendoring_version, pkg_vendoring_build_str])
+
     ignore_list = utils.ensure_list(m.get_value('build/ignore_run_exports'))
+    ignore_list_syms = ['main', '_main', '*get_pc_thunk*']
+    ignore_for_statics = ['gcc_impl_linux*']
     run_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])]
     # For checking if static linking has happened
     build_reqs = [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('build', [])]
@@ -448,29 +456,31 @@ def check_overlinking(m, files):
     prefix_owners = {}
     contains_dsos = {}
     contains_static_libs = {}
-    static_lib_exps = {}
+    # User for both dsos and static_libs
+    all_lib_exports = {}
     for prefix in (m.config.host_prefix, m.config.build_prefix):
         for subdir, dirs, filez in os.walk(prefix):
             for file in filez:
                 fp = os.path.join(subdir, file)
                 rp = os.path.relpath(fp, prefix)
-                prefix_owners[rp] = utils.ensure_list(which_package(rp, prefix))
-                prefix_owners[rp] = [pkg.quad[0] for pkg in prefix_owners[rp]]
+                owners = prefix_owners[rp] if rp in prefix_owners else []
+                new_pkgs = list(which_package(rp, prefix))
+                [owners.append(new_pkg) for new_pkg in new_pkgs if new_pkg not in owners
+                 and not any([glob2.fnmatch.fnmatch(new_pkg.name, i) for i in ignore_for_statics])]
+                prefix_owners[rp] = owners
                 if len(prefix_owners[rp]):
-                    if rp.endswith('.so') or rp.endswith('.dylib') or rp.endswith('.dll'):
+                    if any(glob2.fnmatch.fnmatch(rp, ext) for ext in ('*.so*', '*.dylib*', '*.dll')):
                         contains_dsos[prefix_owners[rp][0]] = True
+                        exports = set(get_exports(fp))
+                        all_lib_exports[rp] = exports
                     elif rp.endswith('.a') or rp.endswith('.lib'):
                         if 'sysroot' in fp:
-                            if prefix_owners[rp][0] == 'gcc_impl_linux-64':
+                            if prefix_owners[rp][0].name.startswith('gcc_impl_linux'):
                                 continue
                             print("sysroot in {}, owner is {}".format(fp,prefix_owners[rp][0]))
                         contains_static_libs[prefix_owners[rp][0]] = True
-                        static_lib_exps[rp] = set(get_exports(fp))
-                # if len(host_prefix_owners[rp]):
-                #     meta = is_linked(m.config.host_prefix, host_prefix_owners[rp][0])
-                #     if meta:
-                #         meta['paths']
-                #     print(df)
+                        exports = set(get_exports(fp))
+                        all_lib_exports[rp] = exports
 
     if 'target_platform' in m.config.variant and m.config.variant['target_platform'] == 'osx-64':
         if not len(sysroots):
@@ -538,36 +548,70 @@ def check_overlinking(m, files):
         needed = inspect_linkages(path, resolve_filenames=True, recurse=False)
         imps = get_imports(path, None)
         exps = get_exports(path, None)
-        syms = set([s['name'] for s in get_symbols(path, None)])
-        if 'main' in syms:
-            syms.remove('main')
-        if '_main' in syms:
-            syms.remove('_main')
-        # Need to remove symbols that are found in any DSOs from syms.
-        for static_lib_name, static_lib_exp in iteritems(static_lib_exps):
-            if len(static_lib_exp):
-                isect = static_lib_exp.intersection(syms)
-                perc_used = float(len(isect)) / float(len(static_lib_exp))
+        relocs = get_relocations(path, None)
+        for reloc in relocs:
+            print(reloc)
+        syms = set([s.name for s in get_symbols(path, None)])
+        # Need to remove symbols that are found in any DSOs from syms? Which will get used though?
+        # Must check that on linux and macOS.
+        for lib_name, lib_exp in iteritems(all_lib_exports):
+            if len(lib_exp):
+                exports_copy = set()
+                for sym in lib_exp:
+                    if not any(glob2.fnmatch.fnmatch(sym, pattern) for pattern in ignore_list_syms):
+                        exports_copy.add(sym)
+                isect = exports_copy.intersection(syms)
+                perc_used = float(len(isect)) / float(len(exports_copy))
+                isect_imps = exports_copy.intersection(imps)
+                perc_used_imps = float(len(isect_imps)) / float(len(exports_copy))
+                isect_exps = exports_copy.intersection(exps)
+                perc_used_exps = float(len(isect_exps)) / float(len(exports_copy))
+                # Indicates dynamic linkage
+                if perc_used_imps > perc_used:
+                    isect = isect_imps
+                    perc_used = perc_used_imps
                 if perc_used > 0.0:
-                    if prefix_owners[static_lib_name][0] not in ignore_list:
+                    if prefix_owners[lib_name][0].name:
                         static_prelude = err_prelude if m.config.error_static_linking else warn_prelude
                     else:
                         static_prelude = info_prelude
-                    print_msg(errors, "{pre}: VENDORING: {perc:.2%} of *entry-point symbols* from {ln} used: {l}".format(
+                    pkg_vendored = prefix_owners[lib_name][0]
+                    vendoring_details = dict({'from_file': lib_name,
+                                              'from_name': pkg_vendored.name,
+                                              'from_version': pkg_vendored.version,
+                                              'from_build_number': pkg_vendored.build_number,
+                                              'from_build_string': pkg_vendored.build_string,
+                                              'total_symbols': len(exports_copy),
+                                              'used_symbols': sorted(list(isect)),
+                                              })
+
+                    old_records = vendoring_record[pkg_vendoring_key] if pkg_vendoring_key in vendoring_record \
+                                  else dict({})
+                    if any(glob2.fnmatch.fnmatch(lib_name, ext) for ext in ('*.so*', '*.dylib*', '*.dll')):
+                        type = 'dynamic'
+                    elif any(glob2.fnmatch.fnmatch(lib_name, ext) for ext in ('*.a', '*.lib')):
+                        type = 'static'
+                    else:
+                        print("ERROR :: What type of file is this? seems to be a code file {}".format(lib_name))
+                        sys.exit(1)
+                    if f in old_records:
+                        old_records[f].append(dict({type: vendoring_details}))
+                    else:
+                        old_records[f] = [dict({type: vendoring_details})]
+                    vendoring_record[pkg_vendoring_key] = old_records
+                    from_pkg = '-'.join([pkg_vendored.name, pkg_vendored.version, pkg_vendored.build_string])
+                    print_msg(errors, "{pre}: VENDORING: {perc:.2%} of entry-point symbols from {ln} used: {l}".format(
                         pre=static_prelude,
                         perc=perc_used,
-                        ln=static_lib_name,
+                        ln=lib_name + ' in ' + from_pkg,
                         l=sorted(list(isect))))
         for needed_dso in needed:
             if needed_dso.startswith(m.config.host_prefix):
                 in_prefix_dso = os.path.normpath(needed_dso.replace(m.config.host_prefix + '/', ''))
                 n_dso_p = "Needed DSO {}".format(in_prefix_dso)
                 and_also = " (and also in this package)" if in_prefix_dso in files else ""
-#                pkgs = prefix_owners[in_prefix_dso]
-#                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
                 pkgs = prefix_owners[in_prefix_dso]
-                print(pkgs)
-                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg in run_reqs]
+                in_pkgs_in_run_reqs = [pkg for pkg in pkgs if pkg.quad[0] in run_reqs]
                 if len(in_pkgs_in_run_reqs) == 1 and in_pkgs_in_run_reqs[0]:
                     if in_pkgs_in_run_reqs[0] in usage_of_run_req:
                         usage_of_run_req[in_pkgs_in_run_reqs[0]].append(f)
@@ -651,6 +695,8 @@ def check_overlinking(m, files):
                     print_msg(errors, "{}: did not find - or even know where to look for: {}".
                                       format(msg_prelude, needed_dso))
 
+    if pkg_vendoring_key in vendoring_record:
+        m.imports = vendoring_record[pkg_vendoring_key]
     if len(errors):
         sys.exit(1)
 

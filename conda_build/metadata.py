@@ -813,6 +813,9 @@ class MetaData(object):
 
         self.undefined_jinja_vars = []
         self.config = get_or_merge_config(config, variant=variant)
+        # This is used to record dynamic and static linking as well
+        # as vendoring.
+        self.imports = dict()
 
         if isfile(path):
             self.meta_path = path

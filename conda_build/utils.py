@@ -1215,6 +1215,7 @@ def filter_files(files_list, prefix, filter_patterns=('(.*[\\\\/])?\.git[\\\\/].
 def filter_info_files(files_list, prefix):
     return filter_files(files_list, prefix, filter_patterns=(
                     'info[\\\\/]index.json',
+                    'info[\\\\/]imports.json',
                     'info[\\\\/]files',
                     'info[\\\\/]paths.json',
                     'info[\\\\/]about.json',
