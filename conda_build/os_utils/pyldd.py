@@ -996,6 +996,11 @@ def _trim_sysroot(sysroot):
         sysroot = sysroot[:-1]
     return sysroot
 
+def win_os_uname():
+    return '_', '_', '_', '_', 'x86_64'
+
+if sys.platform == 'win32':
+    os.uname = win_os_uname
 
 def _get_arch_if_native(arch):
     if arch == 'native':

@@ -1,40 +1,51 @@
 import json
-import lief
+try:
+    import lief
+except:
+    pass
 import os
 import sys
 
 
 def nm(filename):
     """ Return symbols from *filename* binary """
-    binary  = lief.parse(filename) # Build an abstract binary
-    symbols = binary.symbols
+    done = False
+    try:
+        binary  = lief.parse(filename) # Build an abstract binary
+        symbols = binary.symbols
 
-    if len(symbols) > 0:
-        for symbol in symbols:
-            print(dir(symbol))
-            print(symbol)
-    else:
+        if len(symbols) > 0:
+            for symbol in symbols:
+                print(dir(symbol))
+                print(symbol)
+                done = True
+    except:
+        pass
+    if not done:
         print("No symbols found")
 
 
 def codefile_type(filename, skip_symlinks=True):
     if not os.path.exists(filename):
         return None
-    binary = lief.parse(filename)
-    # Future lief has this:
-    # json_data = json.loads(lief.to_json_from_abstract(binary))
-    json_data = json.loads(lief.to_json(binary))
-    if json_data:
-        # print(json.dumps(json_data, sort_keys = True, indent = 4))
-        if 'format' in json_data and json_data['format'] == 'MACHO':
-            return 'machofile'
-        else:
-            if 'header' in json_data and json_data['header']['file_type'] == 'DYNAMIC':
-                return 'elffile'
+    try:
+        binary = lief.parse(filename)
+        # Future lief has this:
+        # json_data = json.loads(lief.to_json_from_abstract(binary))
+        json_data = json.loads(lief.to_json(binary))
+        if json_data:
+            # print(json.dumps(json_data, sort_keys = True, indent = 4))
+            if 'format' in json_data and json_data['format'] == 'MACHO':
+                return 'machofile'
             else:
-                # Just to debug what else comes out.
-                print(json_data['header']['file_type'])
-                return 'elffile'+json_data['header']['file_type']
+                if 'header' in json_data and json_data['header']['file_type'] == 'DYNAMIC':
+                    return 'elffile'
+                else:
+                    # Just to debug what else comes out.
+                    print(json_data['header']['file_type'])
+                    return 'elffile'+json_data['header']['file_type']
+    except:
+        print('WARNING: liefldd: failed codefile_type({})',format(filename))
     return None
 
 # lief cannot handle files it doesn't know about gracefully, so for now,
@@ -61,12 +72,16 @@ def _inspect_linkages_this(filename, sysroot='', arch='native'):
     if not os.path.exists(filename):
         return None, [], []
     sysroot = _trim_sysroot(sysroot)
-    binary = lief.parse(filename)
-    # Future lief has this:
-    # json_data = json.loads(lief.to_json_from_abstract(binary))
-    json_data = json.loads(lief.to_json(binary))
-    if json_data:
-        return filename, json_data['imported_libraries'], json_data['imported_libraries']
+    try:
+        binary = lief.parse(filename)
+        # Future lief has this:
+        # json_data = json.loads(lief.to_json_from_abstract(binary))
+        json_data = json.loads(lief.to_json(binary))
+        if json_data:
+            return filename, json_data['imported_libraries'], json_data['imported_libraries']
+    except:
+        print('WARNING: liefldd: failed _inspect_linkages_this({})',format(filename))
+
     return None, [], []
 
 
@@ -95,9 +110,12 @@ def _inspect_linkages_this(filename, sysroot='', arch='native'):
 def inspect_linkages_lief(filename, resolve_filenames=True, recurse=True, sysroot='', arch='native'):
     if not os.path.exists(filename):
         return []
-    binary = lief.parse(filename)
-    return binary.libraries
-
+    try:
+        binary = lief.parse(filename)
+        return binary.libraries
+    except:
+        print('WARNING: liefldd: failed inspect_linkages_lief({})', format(filename))
+        return []
 
 from .pyldd import inspect_linkages as inspect_linkages_pyldd
 def inspect_linkages(filename, resolve_filenames=True, recurse=True, sysroot='', arch='native'):
@@ -110,15 +128,19 @@ def get_runpaths_lief(filename, arch='native'):
     if not os.path.exists(filename):
         return []
     # print("get_runpaths filepath {}".format(filename))
-    binary = lief.parse(filename)
-    # print("get_runpaths binary {}".format(binary))
-    # Future lief has this:
-    # json_data = json.loads(lief.to_json_from_abstract(binary))
-    json_data = json.loads(lief.to_json(binary))
-    if json_data:
-        if 'format' in json_data and json_data['format'] == 'MACHO':
-            return []
-    return [de.runpath for de in binary.dynamic_entries if de.tag == lief.ELF.DYNAMIC_TAGS.RUNPATH]
+    try:
+        binary = lief.parse(filename)
+        # print("get_runpaths binary {}".format(binary))
+        # Future lief has this:
+        # json_data = json.loads(lief.to_json_from_abstract(binary))
+        json_data = json.loads(lief.to_json(binary))
+        if json_data:
+            if 'format' in json_data and json_data['format'] == 'MACHO':
+                return []
+        return [de.runpath for de in binary.dynamic_entries if de.tag == lief.ELF.DYNAMIC_TAGS.RUNPATH]
+    except:
+        pass
+    return []
 
 from .pyldd import get_runpaths as get_runpaths_pyldd
 def get_runpaths(filename, arch='native'):
@@ -131,12 +153,15 @@ def get_runpaths(filename, arch='native'):
 
 
 def get_imports(filename, arch='native'):
-    if not os.path.exists(filename):
-        return []
-    binary = lief.parse(filename)
-    json_data = json.loads(lief.to_json(binary))
-    if 'imported_functions' in json_data:
-        return json_data['imported_functions']
+    try:
+        if not os.path.exists(filename):
+            return []
+        binary = lief.parse(filename)
+        json_data = json.loads(lief.to_json(binary))
+        if 'imported_functions' in json_data:
+            return json_data['imported_functions']
+    except:
+        print('WARNING: liefldd: failed get_imports({})',format(filename))
     return []
 
 
@@ -163,22 +188,29 @@ def get_exports(filename, arch='native'):
         exports = [r.split(' ')[0] for r in results if (' T ') in r]
         return exports
     else:
-        binary = lief.parse(filename)
-        json_data = json.loads(lief.to_json(binary))
-        if 'exported_functions' in json_data:
-            return json_data['exported_functions']
+        try:
+            binary = lief.parse(filename)
+            json_data = json.loads(lief.to_json(binary))
+            if 'exported_functions' in json_data:
+                return json_data['exported_functions']
+        except:
+            print('WARNING: liefldd: failed get_exports({})',format(filename))
         return []
 
 
 def get_symbols(filename, arch='native'):
     if not os.path.exists(filename):
         return []
-    binary = lief.parse(filename)
-    json_data = json.loads(lief.to_json(binary))
-    if 'symbols' in json_data:
-        return json_data['symbols']
-    elif 'static_symbols' in json_data:
-        return json_data['static_symbols']
+    try:
+        binary = lief.parse(filename)
+        json_data = json.loads(lief.to_json(binary))
+        if 'symbols' in json_data:
+            return json_data['symbols']
+        elif 'static_symbols' in json_data:
+            return json_data['static_symbols']
+    except:
+        print('WARNING: liefldd: failed get_symbols({})',format(filename))
+
     return []
 
 
