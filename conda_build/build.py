@@ -1095,11 +1095,21 @@ bundlers = {
 
 
 def _write_sh_activation_text(file_handle, env, m):
+    # If coming from Windows env vars can contain invalid characters.
+    bad_chars = set("()-${},")
+    cygpath_prefix = "$(cygpath -up '" if utils.on_win else ""
+    cygpath_suffix = "')" if utils.on_win else ""
     for k, v in env.items():
-        if v:
-            file_handle.write('export {0}="{1}"\n'.format(k, v))
-    cygpath_prefix = "$(cygpath -u " if utils.on_win else ""
-    cygpath_suffix = " )" if utils.on_win else ""
+        if v and set(k).isdisjoint(bad_chars):
+            # Heuristics.
+            win_path = False
+            if utils.on_win and isinstance(v, str) and ('\\' in v or (len(v) > 1 and v[1]==':')):
+                win_path = True
+            file_handle.write(
+                'export {k}="{p}{v}{s}"\n'.format(k=k,
+                                                  v=v,
+                                                  p=cygpath_prefix if win_path else "",
+                                                  s=cygpath_suffix if win_path else ""))
     activate_path = ''.join((cygpath_prefix,
                             os.path.join(utils.root_script_dir, 'activate').replace('\\', '\\\\'),
                             cygpath_suffix))
