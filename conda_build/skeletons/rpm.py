@@ -445,6 +445,8 @@ def massage_primary(repo_primary, cdt):
 def valid_depends(depends):
     name = depends['name']
     str_flags = depends['flags']
+    if name.endswith('(ppc-64)'):
+        name = name.rsplit('(ppc-64)')[0]
     if (not name.startswith('rpmlib(') and not
          name.startswith('config(') and not
          name.startswith('pkgconfig(') and not
@@ -453,8 +455,8 @@ def valid_depends(depends):
          '.so' not in name and
          '(' not in name and
          str_flags):
-        return True
-    return False
+        return name
+    return None
 
 
 def remap_license(rpm_license):
@@ -555,7 +557,7 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
 
     sn = cdt['short_name'] + '-' + arch
     if len(depends):
-        depends_specs = ["{}-{}-{} {}{}".format(depend['name'].lower().replace('+', 'x'),
+        depends_specs = ["{}-{}-{} {}{}".format(depend['name'].lower().replace('+', 'x').replace('(ppc-64)', ''),
                                                 cdt['short_name'], depend['arch'],
                                                 depend['flags'], depend['ver'])
                          for depend in depends]
