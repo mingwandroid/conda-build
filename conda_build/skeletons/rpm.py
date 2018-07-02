@@ -11,7 +11,7 @@ import gzip
 import hashlib
 import io
 from os import (chmod, makedirs)
-from os.path import (basename, dirname, exists, join, splitext)
+from os.path import (basename, commonprefix, dirname, exists, join, splitext)
 import re
 from six import string_types
 from textwrap import wrap
@@ -37,9 +37,13 @@ package:
 source:
   - url: {rpmurl}
     {checksum_name}: {checksum}
-    folder: binary
+    folder: binary{stripped_root}
   - url: {srcrpmurl}
     folder: source
+
+build:
+  missing_dso_whitelist:
+    - '*'
 
 {depends_build}
 
@@ -96,13 +100,23 @@ else
 fi
 """
 
+# We have two paths here, one for a libarchive-enabled conda-build
+# (which will unpack RPMs for us).
 BUILDSH = """\
 #!/bin/bash
 
-RPM=$(find ${PWD}/binary -name "*.rpm")
-mkdir -p ${PREFIX}/{hostmachine}/sysroot
-pushd ${PREFIX}/{hostmachine}/sysroot > /dev/null 2>&1
-  "${RECIPE_DIR}"/rpm2cpio "${RPM}" | cpio -idmv
+set -e
+
+mkdir -p ${PREFIX}/powerpc64le-conda_cos7-linux-gnu/sysroot
+RPMS=$(find "${SRC_DIR}"/binary -name "*.rpm" -exec printf "." \; | wc -c | tr -d " ")
+THE_RPM=$(find "${SRC_DIR}"/binary -name "*.rpm")
+TOTAL=$(find "${SRC_DIR}"/binary -type f -exec printf "." \; | wc -c | tr -d " ")
+pushd ${PREFIX}/powerpc64le-conda_cos7-linux-gnu/sysroot > /dev/null 2>&1
+  if [[ ${RPMS} == 1 ]] && [[ ${TOTAL} == 1 ]] && [[ -f ${THE_RPM} ]]; then
+    "${RECIPE_DIR}"/rpm2cpio "${THE_RPM}" | cpio -idmv
+  else
+    cp -Rf "${SRC_DIR}"/binary/* .
+  fi
 popd > /dev/null 2>&1
 """
 
@@ -138,7 +152,7 @@ CDTs = dict({'centos5': {'dirname': 'centos5',
              'centos7': {'dirname': 'centos7',
                          'short_name': 'cos7',
                          'base_url': 'http://mirror.centos.org/altarch/7/os/{base_architecture}/CentOS/',  # noqa
-                         'sbase_url': 'http://vault.centos.org/7.4.1708/os/Source/SPackages/',
+                         'sbase_url': 'http://vault.centos.org/7.5.1804/os/Source/SPackages/',
                          'repomd_url': 'http://mirror.centos.org/altarch/7/os/{base_architecture}/repodata/repomd.xml',  # noqa
                          'host_machine': '{gnu_architecture}-conda_cos7-linux-gnu',
                          'host_subdir': 'linux-ppc64le',
@@ -487,7 +501,7 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
     package = entry_name
     rpm_url = dirname(dirname(cdt['base_url'])) + '/' + entry['location']
     srpm_url = cdt['sbase_url'] + entry['source']
-    _, _, _, _, _, sha256str = rpm_split_url_and_cache(rpm_url, src_cache)
+    _, _, _, _, cached_bin, sha256str = rpm_split_url_and_cache(rpm_url, src_cache)
     try:
         # We ignore the hash of source RPMs since they
         # are not given in the source repository data.
@@ -557,6 +571,17 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
 
     package_l = package.lower().replace('+', 'x')
     package_cdt_name = package_l + '-' + sn
+    # conda-build will elide single top-level folders, undo that
+    stripped_root = ''
+    if exists(cached_bin):
+        import libarchive
+        with libarchive.file_reader(cached_bin) as archive:
+            files = [str(e) for e in archive]
+            common = commonprefix(files)
+            if common.endswith('/') and all(s.startswith(common) for s in files):
+                stripped_root = common[:-1]
+                if stripped_root.startswith('.'): stripped_root = stripped_root[1:]
+
     license, license_family = remap_license(entry['license'])
     d = dict({'version': entry['version']['ver'],
               'packagename': package_cdt_name,
@@ -571,6 +596,7 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
               'license_family': license_family,
               'checksum_name': cdt['checksummer_name'],
               'checksum': entry['checksum'],
+              'stripped_root': stripped_root,
               'summary': '"(CDT) ' + tidy_text(entry['summary']) + '"',
               'description': '|\n        ' + '\n        '.join(tidy_text(entry['description'], 78)),  # noqa
               # Cheeky workaround.  I use ${PREFIX},
@@ -579,9 +605,12 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
               # format string tokens so bounce them
               # back.
               'PREFIX': '{PREFIX}',
-              'RPM': '{RPM}',
+              'RPMS': '{RPMS}',
               'PWD': '{PWD}',
-              'RECIPE_DIR': '{RECIPE_DIR}'})
+              'RECIPE_DIR': '{RECIPE_DIR}',
+              'SRC_DIR': '{SRC_DIR}',
+              'TOTAL': '{TOTAL}',
+              'THE_RPM': '{THE_RPM}'})
     odir = join(output_dir, package_cdt_name)
     try:
         makedirs(odir)
