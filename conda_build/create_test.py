@@ -39,16 +39,17 @@ def _get_output_script_name(m, win_status):
     #   They do not automatically pick up run_test.*, but can be pointed at that explicitly.
 
     ext = '.bat' if win_status else '.sh'
-    name = 'run_test' + ext
+    dst_name = 'run_test' + ext
+    src_name = dst_name
     if m.is_output:
-        name = 'no-file'
+        src_name = 'no-file'
         for out in m.meta.get('outputs', []):
             if m.name() == out.get('name'):
                 out_test_script = out.get('test', {}).get('script', 'no-file')
                 if os.path.splitext(out_test_script)[1].lower() == ext:
-                    name = out_test_script
+                    src_name = out_test_script
                     break
-    return name
+    return src_name, dst_name
 
 
 def create_shell_files(m, test_dir=None):
@@ -63,11 +64,11 @@ def create_shell_files(m, test_dir=None):
 
     shell_files = []
     for status in win_status:
-        name = _get_output_script_name(m, status)
-        dest_file = join(test_dir, name)
-        if exists(join(m.path, name)):
+        src_name, dst_name = _get_output_script_name(m, status)
+        dest_file = join(test_dir, dst_name)
+        if exists(join(m.path, src_name)):
             # disable locking to avoid locking a temporary directory (the extracted test folder)
-            copy_into(join(m.path, name), dest_file, m.config.timeout, locking=False)
+            copy_into(join(m.path, src_name), dest_file, m.config.timeout, locking=False)
         if os.path.basename(test_dir) != 'test_tmp':
             commands = ensure_list(m.get_value('test/commands', []))
             if commands:
