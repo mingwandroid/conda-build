@@ -1112,6 +1112,11 @@ def lief_parse(filename, path_replacements={}):
 
     return result_pyldd
 
+def lief_parse(filename, path_replacements):
+    result = copy.deepcopy(lief_parse_internal(filename, path_replacements))
+    result['fullpath'] = os.path.normpath(filename)
+    return result
+
 '''
 def parse_glibc_version_from_sym(version):
     versions = version.replace('GLIBC_', '').replace('(', '.').replace(')','').split('.')

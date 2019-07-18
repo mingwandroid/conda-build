@@ -10,6 +10,8 @@ import io
 import locale
 import re
 import os
+from os.path import normpath
+                     splitext)
 import shutil
 import stat
 from subprocess import call, check_output, CalledProcessError
@@ -28,8 +30,9 @@ from conda_build.conda_interface import TemporaryDirectory
 from conda_build.conda_interface import md5_file
 
 from conda_build import utils
-from conda_build.os_utils.liefldd import (get_exports_memoized,
-                                          get_rpaths_raw, set_rpath,
+from conda_build.os_utils.liefldd import (have_lief, get_exports_memoized,
+                                          get_linkages_memoized, get_rpaths_raw,
+                                          get_rpaths_raw, get_runpaths_raw, set_rpath,
                                           lief_parse)
 from conda_build.os_utils.pyldd import codefile_type
 from conda_build.os_utils.ldd import get_package_obj_files
@@ -510,10 +513,10 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method=None):
         existing2, _, _ = get_rpaths_raw(elf)
         if existing_pe and [existing_pe] != existing2:
             print('WARNING :: get_rpaths_raw()={} and patchelf={} disagree for {} :: '.format(
-                      existing2, [existing_pe], elf))
+                existing2, [existing], elf))
         # Use LIEF if method is LIEF to get the initial value?
         if method == 'LIEF':
-            existing = existing2
+        existing = existing_pe.split(os.pathsep)
     new = []
     for old in existing:
         if old.startswith('$ORIGIN'):
@@ -911,13 +914,13 @@ def _show_linking_messages(files, errors, file_info, build_prefix, run_prefix, p
         err_prelude = "  ERROR ({},{})".format(pkg_name, f)
         info_prelude = "   INFO ({},{})".format(pkg_name, f)
         msg_prelude = err_prelude if error_overlinking else warn_prelude
-        runpaths = file_info[f]['runpaths'] if 'runpaths' in file_info[f] else None  # TODO :: Check why these aren't getting set.
+        runpaths = file_info[f]['runpaths']
         if runpaths and not (runpath_whitelist or
                              any(fnmatch(f, w) for w in runpath_whitelist)):
             _print_msg(errors, '{}: runpaths {} found in {}'.format(msg_prelude,
                                                                     runpaths,
                                                                     path), verbose=verbose)
-        needed = file_info[f]['libraries']['resolved'] if 'resolved' in file_info[f]['libraries'] else []  # TODO :: Check why these aren't getting set.
+        needed = file_info[f]['libraries']['resolved']
         for needed_dso in needed:
             needed_dso = needed_dso.replace('/', os.sep)
             if not needed_dso.startswith(os.sep) and not needed_dso.startswith('$'):
@@ -1048,61 +1051,29 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
                      f.endswith(('.a', '.lib'))]
 
     # We care only for created program binaries (exes and DSOs) and static libs
-    program_files = [p for p in program_files if not p.endswith('.debug')]
-    from concurrent.futures import ThreadPoolExecutor
-
-    def lief_parse_this(filename, path_replacements):
-        path_replacements_this = path_replacements.copy()
+    for f in program_files:
+        path_replacements_this = path_replacements
         path_replacements_this['exedirname'] = {join(run_prefix, f).replace('\\', '/'): exedirname_sub}
-        return lief_parse(filename, path_replacements_this)
-
-    parallel = True
-    serial = False
-
-    if serial:
-        file_info_serial = dict()
-        for f in program_files:
-            file_info_serial[f] = lief_parse_this(join(run_prefix, f), path_replacements)
-
-    if parallel:
-        file_info_parallel = dict()
-        results = {}
-        with ThreadPoolExecutor(min(os.cpu_count(), max(1, len(program_files)))) as executor:
-            for f in program_files:
-                results[f] = executor.submit(lief_parse_this, join(run_prefix, f), path_replacements)
-
-        for f in program_files:
-            file_info_parallel[f] = results[f].result()
-
-    if serial:
-        print(file_info_serial)
-    if parallel:
-        print(file_info_parallel)
-
-    if serial:
-        file_info = file_info_serial
-    else:
-        file_info = file_info_parallel
-
-    _resolve_needed_dsos(sysroots_files, file_info, run_prefix, sysroot_sub, build_prefix, buildprefix_sub)
+        file_info[f] = lief_parse(join(run_prefix, f), path_replacements_this)
+        file_info[f]['package'] = pkg_vendored_dist
 
     for prefix in (run_prefix, build_prefix):
         for subdir2, _, filez in os.walk(prefix):
             for file in filez:
-                if file.endswith('libterm-bd8f21e3bdd6cbdc.so'):
-                    print("Why does this not make it?")
                 fullpath = join(subdir2, file)
                 rp = relpath(fullpath, prefix)
                 if rp in file_info:
                     if prefix is run_prefix:
-                        file_info[rp]['package'] = pkg_vendored_dist
                         assert file_info[rp]['fullpath'] == fullpath
                 elif rp in files:
                     file_info[rp] = {'package': pkg_vendored_dist,
-                                     'fullpath': fullpath}
+                                          'fullpath': fullpath}
                 else:
                     file_info[rp] = {'package': which_package(rp, prefix),
-                                     'fullpath': fullpath}
+                                          'fullpath': fullpath}
+
+    # Does little, what it does do could be moved to lief_parse() too, pyldd does resolve already ..
+    _resolve_needed_dsos(sysroots_files, file_info, run_prefix, sysroot_sub, build_prefix, buildprefix_sub)
 
     prefix_owners = {}
     for k, v in file_info.items():
@@ -1207,7 +1178,7 @@ def check_overlinking(m, files, host_prefix=None):
 def post_process_shared_lib(m, f, files, host_prefix=None):
     if not host_prefix:
         host_prefix = m.config.host_prefix
-    path = join(host_prefix, f)
+    path = os.path.join(host_prefix, f)
     codefile_t = codefile_type(path)
     if not codefile_t or path.endswith('.debug'):
         return
@@ -1253,13 +1224,18 @@ def post_build(m, files, build_python, host_prefix=None, is_already_linked=False
         for f in files:
             make_hardlink_copy(f, host_prefix)
 
-    if not m.config.target_subdir.startswith('win'):
+    binary_relocation = m.binary_relocation()
+	# If you have explicitly listed files for binary relocation and you are on Windows then
+	# it should be presumed that you really need it to happen.
+    if not m.config.target_subdir.startswith('win') or isinstance(binary_relocation, list):
+        binary_relocation = m.binary_relocation()
+        if not binary_relocation:
+            print("Skipping binary relocation logic")
         osx_is_app = (m.config.target_subdir == 'osx-64' and
                       bool(m.get_value('build/osx_is_app', False)))
         check_symlinks(files, host_prefix, m.config.croot)
         prefix_files = utils.prefix_files(host_prefix)
 
-        binary_relocation = m.binary_relocation()
         if not binary_relocation:
             print("Skipping binary relocation logic")
 
