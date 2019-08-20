@@ -1220,7 +1220,7 @@ def post_build(m, files, build_python):
                 post_process_shared_lib(m, f, prefix_files)
                 cwdc = os.getcwd()
                 print(cwda, cwdb, cwdc)
-    check_overlinking(m, files)
+    # check_overlinking(m, files)
 
 
 def check_symlinks(files, prefix, croot):
