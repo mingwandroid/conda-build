@@ -711,13 +711,11 @@ def _map_file_to_package(files, run_prefix, build_prefix, all_needed_dsos, pkg_v
         for prefix in (run_prefix, build_prefix):
             for subdir2, _, filez in os.walk(prefix):
                 for file in filez:
-                if file == 'lib/rustlib/x86_64-apple-darwin/lib/python2.7/site-packages/lldb/_lldb.so':
-                    print("Debug me .. why you not find libLLVM.dylib in the run_prefix?!")
                     fp = os.path.join(subdir2, file)
                     dynamic_lib = any(fnmatch(fp, ext) for ext in ('*.so.*', '*.dylib.*', '*.dll')) and \
                                 codefile_type(fp, skip_symlinks=False) is not None
                     static_lib = any(fnmatch(fp, ext) for ext in ('*.a', '*.lib'))
-                static_lib = False
+                    static_lib = False
                     # Looking at all the files is very slow.
                     if not dynamic_lib and not static_lib:
                         continue
