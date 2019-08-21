@@ -29,7 +29,7 @@ from conda_build.conda_interface import md5_file
 from conda_build import utils
 from conda_build.os_utils.liefldd import (get_exports_memoized, get_linkages_memoized,
                                           get_linkages_memoized, get_rpaths_raw,
-                                          get_rpaths_raw, get_runpaths_raw, set_rpath)
+                                          get_rpaths_raw, get_runpaths_raw, set_rpath,
                                           lief_parse)
 from conda_build.os_utils.pyldd import codefile_type
 from conda_build.os_utils.ldd import get_package_obj_files
