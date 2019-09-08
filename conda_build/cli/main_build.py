@@ -198,6 +198,14 @@ different sets of packages."""
         default=cc_conda_build.get('set_build_id', 'true').lower() == 'true',
     )
     p.add_argument(
+        "--ignore-PATH-for-build-tools",
+        action="store_true",
+        help="Require recipes to declare build tools needed by conda itself "
+              "(e.g. git, patch) as build deps.",
+        dest='ignore_PATH_for_build_tools',
+        default=cc_conda_build.get('ignore_PATH_for_build_tools', 'true').lower() == 'true',
+    )
+    p.add_argument(
         "--croot",
         help=("Build root folder.  Equivalent to CONDA_BLD_PATH, but applies only "
               "to this call of conda-build.")

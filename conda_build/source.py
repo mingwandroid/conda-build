@@ -24,9 +24,9 @@ if on_win:
     from conda_build.utils import convert_unix_path_to_win
 
 if sys.version_info[0] == 3:
-    from urllib.parse import urljoin
+    from urllib.parse import urljoin, urlsplit, urlunsplit
 else:
-    from urlparse import urljoin
+    from urlparse import urljoin, urlsplit, urlunsplit
 
 git_submod_re = re.compile(r'(?:.+)\.(.+)\.(?:.+)\s(.+)')
 ext_re = re.compile(r"(.*?)(\.(?:tar\.)?[^.]+)$")
@@ -164,6 +164,61 @@ def unpack(source_dict, src_dir, cache_folder, recipe_path, croot, verbose=False
             shutil.move(os.path.join(tmpdir, f), os.path.join(src_dir, f))
 
 
+def check_call_env_log(msg, args, cwd=None, stderr=None, stdout=None):
+    if cwd:
+        print("{}: {} (in {})".format(msg, ' '.join(args), cwd))
+        return check_call_env(args, stderr=stderr, stdout=stdout, cwd=cwd)
+    else:
+        print("{}: {}".format(msg, ' '.join(args)))
+        return check_call_env(args, stderr=stderr, stdout=stdout)
+
+
+def check_output_env_log(msg, args, cwd=None, stderr=None):
+    if cwd:
+        print("{}: {} (in {})".format(msg, ' '.join(args), cwd))
+        return check_output_env(args, stderr=stderr, cwd=cwd)
+    else:
+        print("{}: {}".format(msg, ' '.join(args)))
+        return check_output_env(args, stderr=stderr)
+
+# I cannot get Qt5 to clone successfully:
+# Naive git clone from upstream URL:
+# git clone --recursive -j 12 git://code.qt.io/qt/qt5.git
+# Cloning into 'qt5'...
+# remote: Counting objects: 15575, done.
+# remote: Compressing objects: 100% (10244/10244), done.
+# remote: Total 15575 (delta 10013), reused 8449 (delta 4943)
+# Receiving objects: 100% (15575/15575), 6.03 MiB | 2.83 MiB/s, done.
+# Resolving deltas: 100% (10013/10013), done.
+# Submodule 'qt3d' (git://code.qt.io/qt/qt3d.git) registered for path 'qt3d'
+# Submodule 'qtactiveqt' (git://code.qt.io/qt/qtactiveqt.git) registered for path 'qtactiveqt'
+# Submodule 'qtandroidextras' (git://code.qt.io/qt/qtandroidextras.git) registered for path 'qtandroidextras'
+# Submodule 'qtbase' (git://code.qt.io/qt/qtbase.git) registered for path 'qtbase'
+# Submodule 'qtcanvas3d' (git://code.qt.io/qt/qtcanvas3d.git) registered for path 'qtcanvas3d'
+# Submodule 'qtcharts' (git://code.qt.io/qt/qtcharts.git) registered for path 'qtcharts'
+# ..
+# Steps taken by this code are (highest level):
+# git_mirror_checkout_recursive(mirror_dir=/opt/conda/conda-bld/git_cache/code.qt.io/qt/qt5.git,
+#                               checkout_dir=/opt/conda/conda-bld/qt_1567931856608/work/,
+#                               git_url=git://code.qt.io/qt/qt5.git,
+#                               git_cache=/opt/conda/conda-bld/git_cache,
+#                               git_ref=5.12.4,
+#                               git_depth=-1,
+#                               is_top_level=True)
+# git_mirror_checkout_recursive(mirror_dir=/opt/conda/conda-bld/git_cache/code.qt.io/qtbase.git,
+#                               checkout_dir=/var/folders/xt/rkfy9nxj7bgf3w_64hh_x8740000gp/T/tmpenyc5cwu,
+#                               git_url=../qtbase.git,
+#                               git_cache=/opt/conda/conda-bld/git_cache,
+#                               git_ref=5.12.4,
+#                               git_depth=-1,
+#                               is_top_level=False)
+# SRC_DIR=/opt/conda/conda-bld/qt_1567931856608/work
+# SRC_DIR=/tmp/src_dir ; mkdir ${SRC_DIR}
+# pushd /opt/conda/conda-bld/git_cache/code.qt.io/qt/qt5.git ; /opt/conda/bin/git fetch ${SRC_DIR}; popd
+# /opt/conda/bin/git clone /opt/conda/conda-bld/git_cache/code.qt.io/qt/qt5.git 
+# pushd ${SRC_DIR} ; /opt/conda/bin/git checkout 5.12.4
+# 
+
 def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_cache, git_ref=None,
                                   git_depth=-1, is_top_level=True, verbose=True):
     """ Mirror (and checkout) a Git repository recursively.
@@ -179,11 +234,27 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
         that case conda-build could be tricked into writing
         to the root of the drive and overwriting the system
         folders unless steps are taken to prevent that.
+
+        This is probably buggy. Thinking about it more,
+        is_top_level should never matter. Transitive submodules
+        should be supported and while we are special casing
+        is_top_level that cannot work.
     """
+    if verbose:
+        print("Called git_mirror_checkout_recursive(git={},\n"
+              "                                     mirror_dir={},\n"
+              "                                     checkout_dir={},\n"
+              "                                     git_url={},\n"
+              "                                     git_cache={},\n"
+              "                                     git_ref={},\n"
+              "                                     git_depth={},\n"
+              "                                     is_top_level={})"
+              .format(git, mirror_dir, checkout_dir, git_url, git_cache,
+                      git_ref, git_depth, is_top_level))
 
     if verbose:
-        stdout = None
-        stderr = None
+        stdout = sys.stdout
+        stderr = sys.stderr
     else:
         FNULL = open(os.devnull, 'w')
         stdout = FNULL
@@ -203,60 +274,80 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
     mirror_dir = mirror_dir.rstrip('/')
     if not isdir(os.path.dirname(mirror_dir)):
         os.makedirs(os.path.dirname(mirror_dir))
-    if isdir(mirror_dir):
-        try:
-            if git_ref != 'HEAD':
-                check_call_env([git, 'fetch'], cwd=mirror_dir, stdout=stdout, stderr=stderr)
-            else:
-                # Unlike 'git clone', fetch doesn't automatically update the cache's HEAD,
-                # So here we explicitly store the remote HEAD in the cache's local refs/heads,
-                # and then explicitly set the cache's HEAD.
-                # This is important when the git repo is a local path like "git_url: ../",
-                # but the user is working with a branch other than 'master' without
-                # explicitly providing git_rev.
-                check_call_env([git, 'fetch', 'origin', '+HEAD:_conda_cache_origin_head'],
-                           cwd=mirror_dir, stdout=stdout, stderr=stderr)
-                check_call_env([git, 'symbolic-ref', 'HEAD', 'refs/heads/_conda_cache_origin_head'],
-                           cwd=mirror_dir, stdout=stdout, stderr=stderr)
-        except CalledProcessError:
-            msg = ("Failed to update local git cache. "
-                   "Deleting local cached repo: {} ".format(mirror_dir))
-            print(msg)
 
-            # Maybe the failure was caused by a corrupt mirror directory.
-            # Delete it so the user can try again.
-            shutil.rmtree(mirror_dir)
-            raise
-    else:
-        args = [git, 'clone', '--mirror']
-        if git_depth > 0:
-            args += ['--depth', str(git_depth)]
-        try:
-            check_call_env(args + [git_url, git_mirror_dir], stdout=stdout, stderr=stderr)
-        except CalledProcessError:
-            # on windows, remote URL comes back to us as cygwin or msys format.  Python doesn't
-            # know how to normalize it.  Need to convert it to a windows path.
-            if sys.platform == 'win32' and git_url.startswith('/'):
-                git_url = convert_unix_path_to_win(git_url)
-
-            if os.path.exists(git_url):
-                # Local filepaths are allowed, but make sure we normalize them
-                git_url = normpath(git_url)
-            check_call_env(args + [git_url, git_mirror_dir], stdout=stdout, stderr=stderr)
-        assert isdir(mirror_dir)
+    nattempts = 2
+    for attempts in range(nattempts):
+        if isdir(mirror_dir):
+            # If this fails it may be due to a corrupt mirror directory so we delete it
+            # and try once more.
+            try:
+                if git_ref != 'HEAD':
+                    check_call_env_log('[mirror exists :: {} :: fetch]'.format(git_ref), [git, 'fetch'],
+                                       cwd=mirror_dir, stdout=stdout, stderr=stderr)
+                else:
+                    # Unlike 'git clone', fetch doesn't automatically update the cache's HEAD,
+                    # So here we explicitly store the remote HEAD in the cache's local refs/heads,
+                    # and then explicitly set the cache's HEAD.
+                    # This is important when the git repo is a local path like "git_url: ../",
+                    # but the user is working with a branch other than 'master' without
+                    # explicitly providing git_rev.
+                    check_call_env_log('[mirror exists :: {} :: fetch]'.format(git_ref),
+                                       [git, 'fetch', 'origin', '+HEAD:_conda_cache_origin_head'],
+                                       cwd=mirror_dir, stdout=stdout, stderr=stderr)
+                    check_call_env_log('[mirror exists :: {} :: symbolic-ref]'.format(git_ref),
+                                       [git, 'symbolic-ref', 'HEAD', 'refs/heads/_conda_cache_origin_head'],
+                                       cwd=mirror_dir, stdout=stdout, stderr=stderr)
+            except CalledProcessError:
+                resolution = "retrying" if attempts < (nattempts - 1) else "giving up"
+                msg = ("Failed to update local git cache. "
+                       "Deleting local cached repo: {} and {}".format(mirror_dir, resolution))
+                print(msg)
+                shutil.rmtree(mirror_dir)
+                if resolution == "giving up":
+                    raise
+        else:
+            args = [git, 'clone', '--mirror']
+            if git_depth > 0:
+                args += ['--depth', str(git_depth)]
+            try:
+                check_call_env_log('[mirroring]', args + [git_url, git_mirror_dir],
+                                   stdout=stdout, stderr=stderr)
+            except CalledProcessError:
+                # on windows, remote URL comes back to us as cygwin or msys format.  Python doesn't
+                # know how to normalize it.  Need to convert it to a windows path.
+                if sys.platform == 'win32' and git_url.startswith('/'):
+                    git_url = convert_unix_path_to_win(git_url)
+                if os.path.exists(git_url):
+                    # Local filepaths are allowed, but make sure we normalize them
+                    git_url = normpath(git_url)
+                    try:
+                        check_call_env_log('[mirroring failed :: git_url is local]',
+                                           args + [git_url, git_mirror_dir], stdout=stdout, stderr=stderr)
+                    except CalledProcessError:
+                        if isdir(mirror_dir):
+                            shutil.rmtree(mirror_dir)
+            if isdir(mirror_dir):
+                break
+        if isdir(mirror_dir):
+            break
+    assert isdir(mirror_dir)
 
     # Now clone from mirror_dir into checkout_dir.
-    check_call_env([git, 'clone', git_mirror_dir, git_checkout_dir], stdout=stdout, stderr=stderr)
+    check_call_env_log('[clone {} => {}]'.format(git_mirror_dir, git_checkout_dir),
+                       [git, 'clone', git_mirror_dir, git_checkout_dir], stdout=stdout, stderr=stderr)
     if is_top_level:
         checkout = git_ref
         if git_url.startswith('.'):
-            output = check_output_env([git, "rev-parse", checkout], stdout=stdout, stderr=stderr)
             checkout = output.decode('utf-8')
-        if verbose:
-            print('checkout: %r' % checkout)
+                                          [git, "rev-parse", checkout],
+                                          stdout=stdout, stderr=stderr).output.decode('utf-8')
+            checkout = check_call_env_log('[submodule check]',
+                                            [git, "rev-parse", checkout],
+                                            stdout=stdout, stderr=stderr).output.decode('utf-8')
         if checkout:
             check_call_env([git, 'checkout', checkout],
-                           cwd=checkout_dir, stdout=stdout, stderr=stderr)
+                               [git, 'checkout', checkout],
+                               cwd=checkout_dir, stdout=stdout, stderr=stderr)
 
     # submodules may have been specified using relative paths.
     # Those paths are relative to git_url, and will not exist
@@ -264,20 +355,23 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
     # it so.
     try:
         submodules = check_output_env([git, 'config', '--file', '.gitmodules', '--get-regexp',
+                                          '--get-regexp', 'url'],
                                    'url'], stderr=stdout, cwd=checkout_dir)
-        submodules = submodules.decode('utf-8').splitlines()
     except CalledProcessError:
-        submodules = []
+        submodules = None
     for submodule in submodules:
         matches = git_submod_re.match(submodule)
         if matches and matches.group(2)[0] == '.':
             submod_name = matches.group(1)
             submod_rel_path = matches.group(2)
-            submod_url = urljoin(git_url + '/', submod_rel_path)
+            scheme, netloc, path, query, fragment = urlsplit(git_url)
+            if not path.endswith('/'): path = path + '/'
+            path = os.path.normpath(os.path.join(path, submod_rel_path))
+            submod_url = urlunsplit((scheme, netloc, path, query, fragment))
             submod_mirror_dir = os.path.normpath(
                 os.path.join(mirror_dir, submod_rel_path))
             if verbose:
-                print('Relative submodule %s found: url is %s, submod_mirror_dir is %s' % (
+                print('Recurring for submodule %s: url is %s, submod_mirror_dir is %s' % (
                       submod_name, submod_url, submod_mirror_dir))
             with TemporaryDirectory() as temp_checkout_dir:
                 git_mirror_checkout_recursive(git, submod_mirror_dir, temp_checkout_dir, submod_url,
@@ -702,3 +796,15 @@ def provide(metadata):
         raise
 
     return metadata.config.work_dir
+
+
+if __name__ == '__main__':
+    try:
+        os.system('rm -rf /opt/conda/conda-bld/qt_1567931856608/work')
+    except:
+        pass
+    try:
+        os.makedirs(' /opt/conda/conda-bld/qt_1567931856608/work')
+    except:
+        pass
+                                  mirror_dir='/opt/conda/conda-bld/git_cache/code.qt.io/qt/qt5.git',

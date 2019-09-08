@@ -9,27 +9,31 @@ from conda_build.conda_interface import root_dir
 from glob2 import glob
 
 
-def find_executable(executable, prefix=None):
+def find_executable(executable, prefix=None, ignore_PATH=False):
     # dir_paths is referenced as a module-level variable
     #  in other code
     global dir_paths
     result = None
     if sys.platform == 'win32':
-        dir_paths = [join(root_dir, 'Scripts'),
-                     join(root_dir, 'Library\\mingw-w64\\bin'),
-                     join(root_dir, 'Library\\usr\\bin'),
-                     join(root_dir, 'Library\\bin'), ]
         if prefix:
-            dir_paths[0:0] = [join(prefix, 'Scripts'),
-                              join(prefix, 'Library\\mingw-w64\\bin'),
-                              join(prefix, 'Library\\usr\\bin'),
-                              join(prefix, 'Library\\bin'), ]
+            dir_paths = [join(prefix, 'Scripts'),
+                         join(prefix, 'Library\\mingw-w64\\bin'),
+                         join(prefix, 'Library\\usr\\bin'),
+                         join(prefix, 'Library\\bin'), ]
+        if not ignore_PATH:
+            dir_paths.extend([join(root_dir, 'Scripts'),
+                              join(root_dir, 'Library\\mingw-w64\\bin'),
+                              join(root_dir, 'Library\\usr\\bin'),
+                              join(root_dir, 'Library\\bin'), ])
     else:
-        dir_paths = [join(root_dir, 'bin'), ]
         if prefix:
-            dir_paths.insert(0, join(prefix, 'bin'))
+            dir_paths = [join(prefix, 'bin')]
+        if not ignore_PATH:
+            dir_paths.extend([join(root_dir, 'bin'), ])
 
-    dir_paths.extend(os.environ['PATH'].split(os.pathsep))
+    if not ignore_PATH:
+        dir_paths.extend(os.environ['PATH'].split(os.pathsep))
+
     if sys.platform == 'win32':
         exts = ('.exe', '.bat', '')
     else:

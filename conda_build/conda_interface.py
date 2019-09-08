@@ -102,6 +102,7 @@ from conda.exports import EntityEncoder  # NOQA
 EntityEncoder, FileMode, PathType = EntityEncoder, FileMode, PathType
 
 
+BuildToolPackageNotInstalledError = try_exports("conda.exceptions", "BuildToolPackageNotInstalledError")
 CondaError = try_exports("conda.exceptions", "CondaError")
 CondaHTTPError = try_exports("conda.exceptions", "CondaHTTPError")
 LinkError = try_exports("conda.exceptions", "LinkError")
