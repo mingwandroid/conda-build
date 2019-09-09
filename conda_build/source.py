@@ -307,7 +307,8 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
         if git_depth > 0:
             args += ['--depth', str(git_depth)]
         try:
-            check_call_env_log('[mirroring]', args + [git_url, git_mirror_dir], stdout=stdout, stderr=stderr)
+            check_call_env_log('[mirroring]', args + [git_url, git_mirror_dir],
+			                   stdout=stdout, stderr=stderr)
         except CalledProcessError:
             # on windows, remote URL comes back to us as cygwin or msys format.  Python doesn't
             # know how to normalize it.  Need to convert it to a windows path.
@@ -326,27 +327,28 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
     if is_top_level:
         checkout = git_ref
         if git_url.startswith('.'):
+            output = check_output_env_log('[rev-parse]',
+			                              [git, "rev-parse", checkout],
+										  stdout=stdout, stderr=stderr)
             checkout = output.decode('utf-8')
+            checkout = check_call_env_log('[submodule check]',
                                           [git, "rev-parse", checkout],
                                           stdout=stdout, stderr=stderr).output.decode('utf-8')
-            checkout = check_call_env_log('[submodule check]',
-                                            [git, "rev-parse", checkout],
-                                            stdout=stdout, stderr=stderr).output.decode('utf-8')
         if checkout:
             check_call_env([git, 'checkout', checkout],
-                               [git, 'checkout', checkout],
-                               cwd=checkout_dir, stdout=stdout, stderr=stderr)
+                           cwd=checkout_dir, stdout=stdout, stderr=stderr)
 
     # submodules may have been specified using relative paths.
     # Those paths are relative to git_url, and will not exist
     # relative to mirror_dir, unless we do some work to make
     # it so.
     try:
-        submodules = check_output_env([git, 'config', '--file', '.gitmodules', '--get-regexp',
-                                          '--get-regexp', 'url'],
-                                   'url'], stderr=stdout, cwd=checkout_dir)
+        submodules = check_output_env_log('[submodule get-regexp]',
+		                                  [git, 'config', '--file', '.gitmodules', '--get-regexp', 'url'],
+                                          stderr=stdout, cwd=checkout_dir)
+        submodules = submodules.decode('utf-8').splitlines()
     except CalledProcessError:
-        submodules = None
+        submodules = []
     for submodule in submodules:
         matches = git_submod_re.match(submodule)
         if matches and matches.group(2)[0] == '.':
@@ -383,8 +385,10 @@ def git_source(source_dict, git_cache, src_dir, recipe_path=None, verbose=True):
         os.makedirs(git_cache)
 
     git = external.find_executable('git')
+    if not git and os.path.exists('C:\\opt\\conda\\envs\\git\\Library\\bin\\git.exe'):
+        git = 'C:\\opt\\conda\\envs\\git\\Library\\bin\\git.exe'
     if not git:
-        sys.exit("Error: git is not installed in your root environment or as a build requirement.")
+        sys.exit("Error: git is not installed in your root environment or listed as a build requirement.")
 
     git_depth = int(source_dict.get('git_depth', -1))
     git_ref = source_dict.get('git_rev') or 'HEAD'
@@ -455,6 +459,20 @@ def git_info(src_dir, verbose=True, fo=None):
             if verbose:
                 print(u'==> %s <==\n' % cmd)
                 safe_print_unicode(stdout + u'\n')
+
+
+def git_patch_submodule_map(git, checkout_dir, patches):
+    # Get the sha1s
+    patches_info = {}
+    for patch in patches:
+        with open(patch, 'rt') as p:
+            txt = p.read()
+            shas_re = r'^diff --git (.*)$\n^index ([0-9a-f]+)..([0-9a-f]+) ([0-7]+)$'
+            matches = re.search(shas_re, txt, re.MULTILINE)
+            if matches:
+                for g in matches.groups():
+                    print(g)
+    return None
 
 
 def hg_source(source_dict, src_dir, hg_cache, verbose):
@@ -776,8 +794,14 @@ def provide(metadata):
                     os.makedirs(src_dir)
 
             patches = ensure_list(source_dict.get('patches', []))
-            for patch in patches:
-                apply_patch(src_dir, join(metadata.path, patch), metadata.config, git)
+            patches_map = None
+            if git:
+                patches_map = git_patch_submodule_map(git, metadata.config.work_dir, patches)
+            if patches_map:
+                pass
+            else:
+                for patch in patches:
+                    apply_patch(src_dir, join(metadata.path, patch), metadata.config, git)
 
     except CalledProcessError:
         shutil.move(metadata.config.work_dir, metadata.config.work_dir + '_failed_provide')
@@ -787,12 +811,41 @@ def provide(metadata):
 
 
 if __name__ == '__main__':
-    try:
-        os.system('rm -rf /opt/conda/conda-bld/qt_1567931856608/work')
-    except:
-        pass
-    try:
-        os.makedirs(' /opt/conda/conda-bld/qt_1567931856608/work')
-    except:
-        pass
-                                  mirror_dir='/opt/conda/conda-bld/git_cache/code.qt.io/qt/qt5.git',
+    clean = False
+    test = 'submodule_checkout'
+    test = 'git_patch'
+    if clean:
+        try:
+            os.system('rm -rf /opt/conda/conda-bld/qt_1567931856608/work')
+        except:
+            pass
+        try:
+            os.makedirs('/opt/conda/conda-bld/qt_1567931856608/work')
+        except:
+            pass
+    if test == 'submodule_checkout':
+        git_mirror_checkout_recursive(git='/opt/conda/bin/git',
+                                      mirror_dir='/opt/conda/conda-bld/git_cache/code.qt.io/qt/qt5.git',
+                                      checkout_dir='/opt/conda/conda-bld/qt_1567931856608/work/qt5',
+                                      git_url='git://code.qt.io/qt/qt5.git',
+                                      git_cache='/opt/conda/conda-bld/git_cache',
+                                      git_ref='5.12.4',
+                                      git_depth=-1,
+                                      is_top_level=True)
+    elif test == 'git_patch':
+        from conda_build.config import get_or_merge_config
+        from conda_build import metadata
+        import glob
+        config = get_or_merge_config(config=None, variant_config_files=None)
+        m = metadata.MetaData.fromdict({'source': {'git_url': 'git://code.qt.io/qt/qt5.git'}}, config=config)
+        if not os.path.exists('/opt/conda/conda-bld/qt_1567931856608/work'):
+            git_source(m.get_section('source'), '/opt/conda/conda-bld/git_cache', '/opt/conda/conda-bld/qt_1567931856608/work')
+        patches = glob.glob('/opt/Shared.local/r/c.wip/qt-feedstock/recipe/patches/git/*.patch')
+        git = '/opt/conda/bin/git'
+        if git:
+            patches_map = git_patch_submodule_map(git, '/opt/conda/conda-bld/qt_1567931856608/work/qt5', patches)
+        if patches_map:
+            pass
+        else:
+            for patch in patches:
+                apply_patch(src_dir, join(metadata.path, patch), metadata.config, git)
