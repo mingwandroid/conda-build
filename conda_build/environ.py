@@ -15,8 +15,8 @@ from os.path import join, normpath
 
 # noqa here because PY3 is used only on windows, and trips up flake8 otherwise.
 from .conda_interface import text_type, PY3  # noqa
-from .conda_interface import (CondaError, LinkError, LockError, NoPackagesFoundError,
-                              PaddingError, UnsatisfiableError)
+from .conda_interface import (BuildToolPackageNotInstalledError, CondaError, LinkError, LockError,
+                              NoPackagesFoundError, PaddingError, UnsatisfiableError)
 from .conda_interface import display_actions, execute_actions, execute_plan, install_actions
 from .conda_interface import memoized
 from .conda_interface import package_cache, TemporaryDirectory
@@ -27,7 +27,8 @@ from conda_build import utils
 from conda_build.exceptions import BuildLockError, DependencyNeedsBuildingError
 from conda_build.features import feature_list
 from conda_build.index import get_build_index
-from conda_build.os_utils import external
+from conda_build.os_utils.external import find_executable
+
 from conda_build.utils import ensure_list, prepend_bin_path, env_var
 from conda_build.variants import get_default_variant
 
@@ -438,32 +439,45 @@ def meta_vars(meta, skip_build_id=False):
         # On Windows, subprocess env can't handle unicode.
         git_dir = git_dir.encode(sys.getfilesystemencoding() or 'utf-8')
 
-    git_exe = external.find_executable('git', meta.config.build_prefix)
-    if git_exe and os.path.exists(git_dir):
-        # We set all 'source' metavars using the FIRST source entry in meta.yaml.
-        git_url = meta.get_value('source/0/git_url')
+    if os.path.exists(git_dir):
+        git_exe = find_executable('git',
+                                  prefix=meta.config.build_prefix,
+                                  ignore_PATH=meta.config.ignore_PATH_for_build_tools)
+        if git_exe:
+            # We set all 'source' metavars using the FIRST source entry in meta.yaml.
+            git_url = meta.get_value('source/0/git_url')
 
-        if os.path.exists(git_url):
-            if sys.platform == 'win32':
-                git_url = utils.convert_unix_path_to_win(git_url)
-            # If git_url is a relative path instead of a url, convert it to an abspath
-            git_url = normpath(join(meta.path, git_url))
+            if os.path.exists(git_url):
+                if sys.platform == 'win32':
+                    git_url = utils.convert_unix_path_to_win(git_url)
+                # If git_url is a relative path instead of a url, convert it to an abspath
+                git_url = normpath(join(meta.path, git_url))
 
-        _x = False
+            _x = False
 
-        if git_url:
-            _x = verify_git_repo(git_exe,
-                                 git_dir,
-                                 git_url,
-                                 meta.config.git_commits_since_tag,
-                                 meta.config.debug,
-                                 meta.get_value('source/0/git_rev', 'HEAD'))
+            if git_url:
+                _x = verify_git_repo(git_exe,
+                                     git_dir,
+                                     git_url,
+                                     meta.config.git_commits_since_tag,
+                                     meta.config.debug,
+                                     meta.get_value('source/0/git_rev', 'HEAD'))
 
-        if _x or meta.get_value('source/0/path'):
-            d.update(get_git_info(git_exe, git_dir, meta.config.debug))
-
-    elif external.find_executable('hg', meta.config.build_prefix) and os.path.exists(hg_dir):
-        d.update(get_hg_build_info(hg_dir))
+            if _x or meta.get_value('source/0/path'):
+                d.update(get_git_info(git_exe, git_dir, meta.config.debug))
+        else:
+            raise BuildToolPackageNotInstalledError(prefix=meta.config.build_prefix,
+                                                    build_tool_package_name='git')
+    else:
+        if os.path.exists(hg_dir):
+            hg_exe = find_executable('hg',
+                                     prefix=meta.config.build_prefix,
+                                     ignore_PATH=meta.config.ignore_PATH_for_build_tools)
+            if hg_exe:
+                d.update(get_hg_build_info(hg_dir))
+            else:
+                raise BuildToolPackageNotInstalledError(prefix=meta.config.build_prefix,
+                                                        build_tool_package_name='mercurial')
 
     # use `get_value` to prevent early exit while name is still unresolved during rendering
     d['PKG_NAME'] = meta.get_value('package/name')

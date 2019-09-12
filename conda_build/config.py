@@ -78,6 +78,8 @@ def _get_default_settings():
             Setting('verbose', True),
 
             Setting('debug', False),
+            Setting('ignore_PATH_for_build_tools', cc_conda_build.get('ignore_PATH_for_build_tools',
+                                                                      'false').lower() == 'true'),
             Setting('timeout', 900),
             Setting('set_build_id', True),
             Setting('disable_pip', False),
