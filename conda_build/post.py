@@ -501,11 +501,11 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method='LIEF'):
             new.append(old)
         elif old.startswith('/'):
             # Test if this absolute path is outside of prefix. That is fatal.
-            relp = relpath(old, prefix)
+            relpath = relpath(old, prefix)
             if relp.startswith('..' + os.sep):
                 print('Warning: rpath {0} is outside prefix {1} (removing it)'.format(old, prefix))
             else:
-                relp = '$ORIGIN/' + relpath(old, origin)
+                relpath = '$ORIGIN/' + relpath(old, origin)
                 if relp not in new:
                     new.append(relp)
     # Ensure that the asked-for paths are also in new.
@@ -1014,10 +1014,6 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
             whitelist = DEFAULT_WIN_WHITELIST
             build_is_host = True if sys.platform == 'win-32' else False
 
-    # Sort the sysroots by the number of files in them so you can
-    # assume that the first sysroot is more 'important' than others.
-    sysroot_files = sysroot_path_list(subdir, sysroots[0], whitelist)
-
     sysroots_files = dict()
     for sysroot in sysroots:
         from conda_build.utils import prefix_files
@@ -1081,7 +1077,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
             if (error_overlinking and
                not needed_dso.startswith('/') and
                not needed_dso.startswith(sysroot_sub) and
-               not needed_dso.startswith(build_prefix_sub) and
+               not needed_dso.startswith(buildprefix_sub) and
                needed_dso not in prefix_owners and
                needed_dso not in files):
                 in_whitelist = False
