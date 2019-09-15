@@ -699,6 +699,25 @@ def finalize_outputs_pass(base_metadata, render_order, pass_no, outputs=None,
                 log.info("Attempting to finalize metadata for {}".format(metadata.name()))
             # Using base_metadata is important for keeping the reference to the parent recipe
             om = base_metadata.copy()
+            if metadata.needs_source_for_render:
+                output_d = om.get_rendered_output(metadata.name()) or {'name': metadata.name()}
+                # If we create a build env at this point we can use build tools.
+                if (om.needs_source_for_render and om.uses_vcs_in_meta and
+                        om.uses_vcs_in_meta in output_d['requirements']['build']):
+                    # Create a temporary build env if we can.
+                    if any('{{' in build_req for build_req in output_d['requirements']['build']):
+                        print("This recipe is impossible. Cannot create the build env which we need to to render the"
+                              "sources, but I cannot because you are this is unrendered jinja 2 in them still.\n{}"
+                              .format('\n'.join(output_d['requirements']['build'])))
+                        print("I'm going to create you a temporary build env so I can render the sources.")
+                try:
+                    # this should be a no-op if source is already here
+                    from conda_build.source import try_download
+                    try_download(metadata, no_download_source=False)
+                except:
+                    print("Build tools not found again! (2)")
+                else:
+                    print("Build tools found 3nd time.")
             # other_outputs is the context of what's available for
             # pin_subpackage. It's stored on the metadata object here, but not
             # on base_metadata, which om is a copy of. Before we do
@@ -2039,6 +2058,7 @@ class MetaData(object):
                     #    obtain an exact match elsewhere
                     non_conda_packages.append((output_d, m))
 
+            # IT IS ONLY FROM THIS POINT ONWARDS THAT WE CAN USE THE BUILD REQUIREMENTS.
             # early stages don't need to do the finalization.  Skip it until the later stages
             #     when we need it.
             if not permit_undefined_jinja and not ref_metadata.skip():

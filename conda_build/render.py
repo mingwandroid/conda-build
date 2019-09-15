@@ -627,11 +627,12 @@ def try_download(metadata, no_download_source, raise_error=False):
         #    meta.yaml, and not previously installed in builder env.
         try:
             source.provide(metadata)
-        except subprocess.CalledProcessError as error:
+        except (subprocess.CalledProcessError, FileNotFoundError) as error:
             print("Warning: failed to download source.  If building, will try "
                 "again after downloading recipe dependencies.")
             print("Error was: ")
             print(error)
+            print(metadata.source_provided)
 
     if not metadata.source_provided:
         if no_download_source:

@@ -1348,7 +1348,31 @@ def build(m, stats, post=None, need_source_download=True, need_reparse_in_env=Fa
 
     # this should be a no-op if source is already here
     if m.needs_source_for_render:
-        try_download(m, no_download_source=False)
+        output_d = m.get_rendered_output(metadata.name()) or {'name': metadata.name()}
+        # If we create a build env at this point we can use build tools.
+        if (m.needs_source_for_render and m.uses_vcs_in_meta and
+                m.uses_vcs_in_meta in output_d['requirements']['build']):
+            # Create a temporary build env if we can.
+            if any('{{' in build_req for build_req in output_d['requirements']['build']):
+                print("This recipe is impossible. Cannot create the build env which we need to to render the"
+                      "sources, but I cannot because you are this is unrendered jinja 2 in them still.\n{}"
+                      .format('\n'.join(output_d['requirements']['build'])))
+                print("I'm going to create you a temporary build env so I can render the sources.")
+        try:
+            # this should be a no-op if source is already here
+            from conda_build.source import try_download
+            try_download(metadata, no_download_source=False)
+        except:
+            print("Build tools not found again! (2)")
+        else:
+            print("Build tools found 3nd time.")
+
+        try:
+            try_download(m, no_download_source=False, raise_error=True)
+        except:
+            print("Build tools not found again!")
+        else:
+            print("Build tools found 2nd time.")
 
     if post in [False, None]:
         output_metas = expand_outputs([(m, need_source_download, need_reparse_in_env)])

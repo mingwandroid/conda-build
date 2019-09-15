@@ -678,7 +678,8 @@ def apply_patch(src_dir, path, config, git=None):
             print('Applying patch: %r' % path)
         patch = external.find_executable('patch', config.build_prefix)
         if patch is None:
-            sys.exit("""\
+            log = get_logger(__name__)
+            log.error("""\
         Error:
             Cannot use 'git' (not a git repo and/or patch) and did not find 'patch' in: %s
             You can install 'patch' using apt-get, yum (Linux), Xcode (MacOSX),
@@ -803,7 +804,7 @@ def provide(metadata):
                 for patch in patches:
                     apply_patch(src_dir, join(metadata.path, patch), metadata.config, git)
 
-    except CalledProcessError:
+    except (CalledProcessError, FileNotFoundError):
         shutil.move(metadata.config.work_dir, metadata.config.work_dir + '_failed_provide')
         raise
 

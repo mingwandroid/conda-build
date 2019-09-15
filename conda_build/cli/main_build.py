@@ -458,6 +458,8 @@ def main():
         print("File lock on {0} could not be obtained.  You might need to try fewer builds at once."
               "  Otherwise, run conda clean --lock".format(e.lock_file))
         sys.exit(1)
+    except Exception as e:
+        print(e)
     return
 
 
