@@ -504,13 +504,13 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method='LIEF'):
             new.append(old)
         elif old.startswith('/'):
             # Test if this absolute path is outside of prefix. That is fatal.
-            relpath = relpath(old, prefix)
-            if relp.startswith('..' + os.sep):
+            rp = relpath(old, prefix)
+            if rp.startswith('..' + os.sep):
                 print('Warning: rpath {0} is outside prefix {1} (removing it)'.format(old, prefix))
             else:
-                relpath = '$ORIGIN/' + relpath(old, origin)
-                if relp not in new:
-                    new.append(relp)
+                rp = '$ORIGIN/' + relpath(old, origin)
+                if rp not in new:
+                    new.append(rp)
     # Ensure that the asked-for paths are also in new.
     for rpath in rpaths:
         if rpath != '':
@@ -1046,15 +1046,15 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
         for subdir2, _, filez in os.walk(prefix):
             for file in filez:
                 fullpath = join(subdir2, file)
-                relpath = relpath(fullpath, prefix)
-                if relp in file_info:
+                rp = relpath(fullpath, prefix)
+                if rp in file_info:
                     if prefix is run_prefix:
-                        assert file_info[relp]['fullpath'] == fullpath
-                elif relp in files:
-                    file_info[relp] = {'package': pkg_vendored_dist,
+                        assert file_info[rp]['fullpath'] == fullpath
+                elif rp in files:
+                    file_info[rp] = {'package': pkg_vendored_dist,
                                           'fullpath': fullpath}
                 else:
-                    file_info[relp] = {'package': which_package(relp, prefix),
+                    file_info[rp] = {'package': which_package(rp, prefix),
                                           'fullpath': fullpath}
 
     # Does little, what it does do could be moved to lief_parse() too, pyldd does resolve already ..
@@ -1353,7 +1353,7 @@ def sysroot_path_list(subdir, sysroot=None, whitelist_forcing_rescan=None):
     '''
     Does the 'best thing' to get a sysroot path list given the sys.platform and
     subdir. When subdir is "linux-*", sysroot will always point to a proper sysroot
-    (should it be multiple?) and force_baked is meaningless.
+    (should it be multiple?)
     '''
     matches = None
     if (subdir.startswith('linux') or
@@ -1365,6 +1365,9 @@ def sysroot_path_list(subdir, sysroot=None, whitelist_forcing_rescan=None):
     module_name = 'conda_build.post.baked_sysroot_pathlists'
     module_path = join(dirname(__file__), 'baked_sysroot_pathlists', subdir.replace('-', '_')+'.py')
 
+    if not exists(module_path):
+        return matches
+
     try:
         # Python 3
         import importlib.util
@@ -1373,8 +1376,8 @@ def sysroot_path_list(subdir, sysroot=None, whitelist_forcing_rescan=None):
         spec.loader.exec_module(baked_sysroot_pathlists)
     except:
         # Python 2
-        import imp
-        baked_sysroot_pathlists = imp.load_source(module_name, module_path)
+        from imp import load_source
+        baked_sysroot_pathlists = load_source(module_name, module_path)
 
     # TODO :: Consider allowing multiple WHITELISTs per module?
     for entry in dir(baked_sysroot_pathlists):
@@ -1403,7 +1406,6 @@ def bake_sys_platform_sysroot_path_list(sysroot=None):
         # If we go above 10.9 we need to pretend that tbd files are dylibs and do some
         # horrible swapping between them and system dylibs at some stage.
         if not sysroot: sysroot = '/opt/MacOSX10.9.sdk'
-        glob_ext = '*.dylib'
         whitelist = DEFAULT_MAC_WHITELIST
         baked_name = 'DEFAULT_MAC_WHITELIST_BAKED'
     else:
