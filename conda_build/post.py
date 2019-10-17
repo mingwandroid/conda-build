@@ -1158,7 +1158,7 @@ def check_overlinking(m, files):
 def post_process_shared_lib(m, f, files):
     path = join(m.config.host_prefix, f)
     codefile_t = codefile_type(path)
-    if not codefile_t:
+    if not codefile_t or path.endswith('.debug'):
         return
     rpaths = m.get_value('build/rpaths', ['lib'])
     if sys.platform.startswith('linux') and codefile_t == 'elffile':
