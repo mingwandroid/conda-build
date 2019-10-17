@@ -1033,6 +1033,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
                      f.endswith(('.a', '.lib'))]
 
     # We care only for created program binaries (exes and DSOs) and static libs
+    program_files = [p for p in program_files if not p.endswith('.debug')]
     for f in program_files:
         path_replacements_this = path_replacements
         path_replacements_this['exedirname'] = {join(run_prefix, f).replace('\\', '/'): exedirname_sub}
@@ -1162,7 +1163,7 @@ def post_process_shared_lib(m, f, files, host_prefix=None):
         host_prefix = m.config.host_prefix
     path = join(m.config.host_prefix, f)
     codefile_t = codefile_type(path)
-    if not codefile_t:
+    if not codefile_t or path.endswith('.debug'):
         return
     rpaths = m.get_value('build/rpaths', ['lib'])
     if sys.platform.startswith('linux') and codefile_t == 'elffile':
