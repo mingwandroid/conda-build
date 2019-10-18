@@ -37,13 +37,13 @@ package:
 source:
   - url: {rpmurl}
     {checksum_name}: {checksum}
-    ho_hoist: true
+    no_hoist: true
     folder: binary
   - url: {srcrpmurl}
     folder: source
 
 build:
-  number: 0
+  number: 2
   noarch: generic
   missing_dso_whitelist:
     - '*'
@@ -65,6 +65,16 @@ BUILDSH = """\
 set -o errexit -o pipefail
 
 mkdir -p "${PREFIX}"/{hostmachine}/sysroot
+if [[ -d usr/lib ]]; then
+  if [[ ! -d lib ]]; then
+    ln -s usr/lib lib
+  fi
+fi
+if [[ -d usr/lib64 ]]; then
+  if [[ ! -d lib64 ]]; then
+    ln -s usr/lib64 lib64
+  fi
+fi
 pushd "${PREFIX}"/{hostmachine}/sysroot > /dev/null 2>&1
 cp -Rf "${SRC_DIR}"/binary/* .
 """
