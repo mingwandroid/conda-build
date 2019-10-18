@@ -37,6 +37,7 @@ package:
 source:
   - url: {rpmurl}
     {checksum_name}: {checksum}
+    ho_hoist: true
     folder: binary
   - url: {srcrpmurl}
     folder: source
@@ -511,8 +512,9 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
         dependsstr_part = '\n'.join(['    - {}'.format(depends_spec)
                                      for depends_spec in depends_specs])
         dependsstr_build = '  build:\n' + dependsstr_part + '\n'
+        dependsstr_host = '  host:\n' + dependsstr_part + '\n'
         dependsstr_run = '  run:\n' + dependsstr_part
-        dependsstr = 'requirements:\n' + dependsstr_build + dependsstr_run
+        dependsstr = 'requirements:\n' + dependsstr_build + dependsstr_host + dependsstr_run
 
     package_l = package.lower().replace('+', 'x')
     package_cdt_name = package_l + '-' + sn
