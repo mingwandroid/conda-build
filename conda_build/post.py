@@ -1033,6 +1033,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
             or f.endswith(('.a', '.lib'))]
 
     # We care only for created program binaries (exes and DSOs) and static libs
+    program_files = [p for p in program_files if not p.endswith('.debug')]
     for f in program_files:
         path_replacements_this = path_replacements
         path_replacements_this['exedirname'] = {join(run_prefix, f).replace('\\', '/'): exedirname_sub}
@@ -1061,7 +1062,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
     for k, v in file_info.items():
         prefix_owners[k] = v['package']
 
-    for f in files:
+    for f in program_files:
         fi = file_info[f]
         if not 'filetype' in fi:
             continue
