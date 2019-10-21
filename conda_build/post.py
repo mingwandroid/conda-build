@@ -500,11 +500,12 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method='LIEF'):
                 elf, method))
             method = 'LIEF'
         else:
-            if existing != [existing_pe]:
-                print('ERROR :: get_rpaths_raw()={} and patchelf={} disagree for {} :: '.format(
+            if have_lief:
+                if existing != [existing_pe]:
+                    print('ERROR :: get_rpaths_raw()={} and patchelf={} disagree for {} :: '.format(
                         existing, [existing_pe], elf))
-            # Use LIEF if method is LIEF to get the initial value?
-            existing = existing_pe.split(os.pathsep)
+                # Use LIEF if method is LIEF to get the initial value?
+                existing = existing_pe.split(os.pathsep)
     new = []
     for old in existing:
         if old.startswith('$ORIGIN'):
