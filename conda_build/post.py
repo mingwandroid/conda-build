@@ -530,7 +530,7 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method='LIEF'):
 
     # check_binary_patchers(elf, prefix, rpath)
 
-    if method == 'LIEF' or not patchelf:
+    if method.upper() == 'LIEF' or not patchelf:
         set_rpath(old_matching='*', new_rpath=rpath, file=elf)
     else:
         call([patchelf, '--force-rpath', '--set-rpath', rpath, elf])
@@ -1166,7 +1166,7 @@ def post_process_shared_lib(m, f, files):
         return
     rpaths = m.get_value('build/rpaths', ['lib'])
     if sys.platform.startswith('linux') and codefile_t == 'elffile':
-        mk_relative_linux(f, m.config.host_prefix, rpaths=rpaths)
+        mk_relative_linux(f, m.config.host_prefix, rpaths=rpaths, method=m.get_value('build/rpath_patcher', "LIEF"))
     elif sys.platform == 'darwin' and codefile_t == 'machofile':
         mk_relative_osx(path, m.config.host_prefix, m.config.build_prefix, files=files, rpaths=rpaths)
 
