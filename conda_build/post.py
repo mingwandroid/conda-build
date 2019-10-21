@@ -530,7 +530,7 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method='LIEF'):
 
     # check_binary_patchers(elf, prefix, rpath)
 
-    if method == 'LIEF' or not patchelf:
+    if method.upper() == 'LIEF' or not patchelf:
         set_rpath(old_matching='*', new_rpath=rpath, file=elf)
     else:
         call([patchelf, '--force-rpath', '--set-rpath', rpath, elf])
@@ -1161,7 +1161,7 @@ def check_overlinking(m, files, host_prefix=None):
 def post_process_shared_lib(m, f, files, host_prefix=None):
     if not host_prefix:
         host_prefix = m.config.host_prefix
-    path = join(m.config.host_prefix, f)
+    path = join(host_prefix, f)
     codefile_t = codefile_type(path)
     if not codefile_t or path.endswith('.debug'):
         return
