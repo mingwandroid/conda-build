@@ -1166,7 +1166,9 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
         return dict()
 
 
-def check_overlinking(m, files):
+def check_overlinking(m, files, host_prefix=None):
+    if not host_prefix:
+        host_prefix = m.config.host_prefix
     return check_overlinking_impl(m.get_value('package/name'),
                                   m.get_value('package/version'),
                                   m.get_value('build/string'),
@@ -1176,7 +1178,7 @@ def check_overlinking(m, files):
                                   [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('run', [])],
                                   [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('build', [])],
                                   [req.split(' ')[0] for req in m.meta.get('requirements', {}).get('host', [])],
-                                  m.config.host_prefix,
+                                  host_prefix,
                                   m.config.build_prefix,
                                   m.meta.get('build', {}).get('missing_dso_whitelist', []),
                                   m.meta.get('build', {}).get('runpath_whitelist', []),
@@ -1190,8 +1192,10 @@ def check_overlinking(m, files):
                                   m.config.channel_urls)
 
 
-def post_process_shared_lib(m, f, files):
-    path = join(m.config.host_prefix, f)
+def post_process_shared_lib(m, f, files, host_prefix=None):
+    if not host_prefix:
+        host_prefix = m.config.host_prefix
+    path = join(host_prefix, f)
     codefile_t = codefile_type(path)
     if not codefile_t or path.endswith('.debug'):
         return
@@ -1226,12 +1230,15 @@ def fix_permissions(files, prefix):
                 log.warn(str(e))
 
 
-def post_build(m, files, build_python):
+def post_build(m, files, build_python, host_prefix=None, is_already_linked=False):
     print('number of files:', len(files))
 
-    host_prefix = m.config.host_prefix
-    for f in files:
-        make_hardlink_copy(f, host_prefix)
+    if not host_prefix:
+        host_prefix = m.config.host_prefix
+
+    if not is_already_linked:
+        for f in files:
+            make_hardlink_copy(f, host_prefix)
 
     cwda = os.getcwd()
     if not m.config.target_subdir.startswith('win'):
