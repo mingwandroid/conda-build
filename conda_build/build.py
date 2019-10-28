@@ -900,7 +900,7 @@ def get_files_with_prefix(m, files_in, prefix):
                                    tag='CMake build metadata',
                                    regex_re=r'([^;\s"]+/sysroot)',
                                    replacement_re=r'$ENV{CONDA_BUILD_SYSROOT}',
-                                   match_records=all_matches,
+                                   match_records={},
                                    debug=m.config.debug)
     ext = ('.pri', '.prl')
     all_matches = have_regex_files(files=[f for f in files if f.endswith(ext)], prefix=prefix,
@@ -2667,6 +2667,7 @@ def test(recipedir_or_package_or_metadata, config, stats, move_broken=True, prov
         from conda_build.utils import get_installed_packages
         installed = get_installed_packages(metadata.config.test_prefix)
         files = installed[metadata.meta['package']['name']]['files']
+        create_info_files(metadata, files, metadata.config.test_prefix)
         post_build(metadata, files, None, metadata.config.test_prefix, True)
 
     # when workdir is removed, the source files are unavailable.  There's the test/source_files
