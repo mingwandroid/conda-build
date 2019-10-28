@@ -484,17 +484,24 @@ def mk_relative_linux(f, prefix, rpaths=('lib',), method='LIEF'):
     elf = join(prefix, f)
     origin = dirname(elf)
 
+    existing, _, _ = get_rpaths_raw(elf)
     patchelf = external.find_executable('patchelf', prefix)
-    try:
-        existing = check_output([patchelf, '--print-rpath', elf]).decode('utf-8').splitlines()[0]
-    except CalledProcessError:
-        print('patchelf: --print-rpath failed for %s\n' % (elf))
-        return
-    existing2, _, _ = get_rpaths_raw(elf)
-    if [existing] != existing2:
-        print('ERROR :: get_rpaths_raw()={} and patchelf={} disagree for {} :: '.format(
-                  existing2, [existing], elf))
-    existing = existing.split(os.pathsep)
+    if not patchelf:
+        print("ERROR :: You should install patchelf, will proceed with LIEF for {} (was {})".format(elf, method))
+        method = 'LIEF'
+    else:
+        try:
+            existing_pe = check_output([patchelf, '--print-rpath', elf]).decode('utf-8').splitlines()[0]
+        except CalledProcessError:
+            print("ERROR :: `patchelf --print-rpath` failed for {}, will proceed with LIEF (was {})".format(
+                elf, method))
+            method = 'LIEF'
+        else:
+            if existing != [existing_pe]:
+                print('ERROR :: get_rpaths_raw()={} and patchelf={} disagree for {} :: '.format(
+                        existing, [existing_pe], elf))
+            # Use LIEF if method is LIEF to get the initial value?
+            existing = existing_pe.split(os.pathsep)
     new = []
     for old in existing:
         if old.startswith('$ORIGIN'):
@@ -1197,10 +1204,10 @@ def post_process_shared_lib(m, f, files, host_prefix=None):
     if not codefile_t or path.endswith('.debug'):
         return
     rpaths = m.get_value('build/rpaths', ['lib'])
-    if sys.platform.startswith('linux') and codefile_t == 'elffile':
-        mk_relative_linux(f, m.config.host_prefix, rpaths=rpaths, method=m.get_value('build/rpath_patcher', "LIEF"))
-    elif sys.platform == 'darwin' and codefile_t == 'machofile':
-        mk_relative_osx(path, m.config.host_prefix, m.config.build_prefix, files=files, rpaths=rpaths)
+    if codefile_t == 'elffile':
+        mk_relative_linux(f, host_prefix, rpaths=rpaths, method=m.get_value('build/rpath_patcher', "LIEF"))
+    elif codefile_t == 'machofile':
+        mk_relative_osx(path, host_prefix, m.config.build_prefix, files=files, rpaths=rpaths)
 
 
 def fix_permissions(files, prefix):
