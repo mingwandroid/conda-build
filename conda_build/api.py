@@ -168,6 +168,7 @@ def build(recipe_paths_or_metadata, post=None, need_source_download=True,
                                          "other arguments (config) by keyword.")
 
     config = get_or_merge_config(config, **kwargs)
+    config.debug = True
 
     # if people don't pass in an object to capture stats in, they won't get them returned.
     #     We'll still track them, though.
