@@ -1,14 +1,15 @@
 from __future__ import absolute_import, division, print_function
 
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, Mapping, OrderedDict
 from functools import partial
 from fnmatch import fnmatch, translate, filter as fnmatch_filter
+from os.path import (basename, commonprefix, dirname, exists, isabs, isdir, isfile,
+                     islink, join, normpath, realpath, relpath, splitext)
+from pathlib import Path, PurePath
 import io
 import locale
 import re
 import os
-                     isfile, islink, join, normpath, realpath, relpath,
-                     splitext)
 import shutil
 import stat
 from subprocess import call, check_output, CalledProcessError
@@ -27,9 +28,8 @@ from conda_build.conda_interface import TemporaryDirectory
 from conda_build.conda_interface import md5_file
 
 from conda_build import utils
-from conda_build.os_utils.liefldd import (get_exports_memoized, get_linkages_memoized,
-                                          get_linkages_memoized, get_rpaths_raw,
-                                          get_rpaths_raw, get_runpaths_raw, set_rpath,
+from conda_build.os_utils.liefldd import (get_exports_memoized,
+                                          get_rpaths_raw, set_rpath,
                                           lief_parse)
 from conda_build.os_utils.pyldd import codefile_type
 from conda_build.os_utils.ldd import get_package_obj_files
@@ -680,6 +680,7 @@ DEFAULT_WIN_WHITELIST = ['/System32/ADVAPI32.dll',
                          '/System32/msvcrt.dll',
                          '/System32/**/api-ms-win*.dll']
 
+
 def _resolve_needed_dsos(sysroots_files, libs_info, run_prefix,
                          sysroot_substitution, build_prefix, build_prefix_substitution):
     sysroot = ''
@@ -902,13 +903,13 @@ def _show_linking_messages(files, errors, file_info, build_prefix, run_prefix, p
         err_prelude = "  ERROR ({},{})".format(pkg_name, f)
         info_prelude = "   INFO ({},{})".format(pkg_name, f)
         msg_prelude = err_prelude if error_overlinking else warn_prelude
-        runpaths = file_info[f]['runpaths']
+        runpaths = file_info[f]['runpaths'] if 'runpaths' in file_info[f] else None  # TODO :: Check why these aren't getting set.
         if runpaths and not (runpath_whitelist or
                              any(fnmatch(f, w) for w in runpath_whitelist)):
             _print_msg(errors, '{}: runpaths {} found in {}'.format(msg_prelude,
                                                                     runpaths,
                                                                     path), verbose=verbose)
-        needed = file_info[f]['libraries']['resolved']
+        needed = file_info[f]['libraries']['resolved'] if 'resolved' in file_info[f]['libraries'] else []  # TODO :: Check why these aren't getting set.
         for needed_dso in needed:
             needed_dso = needed_dso.replace('/', os.sep)
             if not needed_dso.startswith(os.sep) and not needed_dso.startswith('$'):
@@ -922,9 +923,7 @@ def _show_linking_messages(files, errors, file_info, build_prefix, run_prefix, p
                                              info_prelude, sysroot_prefix, sysroot_substitution, verbose)
 
 
-import collections
-
-class FrozenDict(collections.Mapping):
+class FrozenDict(Mapping):
     """Don't forget the docstrings!!"""
 
     def __init__(self, *args, **kwargs):
@@ -955,7 +954,6 @@ class FrozenDict(collections.Mapping):
                 self._hash ^= hash(v)
         return self._hash
 
-from pathlib import Path, PurePath
 
 def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdir,
                            ignore_run_exports,
@@ -997,7 +995,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
 
     pkg_vendored_dist, pkg_vendoring_key = _get_fake_pkg_dist(pkg_name, pkg_version, build_str, build_number)
 
-    ignore_list_syms = ['main', '_main', '*get_pc_thunk*', '___clang_call_terminate', '_timeout']
+    # ignore_list_syms = ['main', '_main', '*get_pc_thunk*', '___clang_call_terminate', '_timeout']
     # ignore_for_statics = ['gcc_impl_linux*', 'compiler-rt*', 'llvm-openmp*', 'gfortran_osx*']
     # sysroots and whitelists are similar, but the subtle distinctions are important.
     sysroot_prefix = build_prefix
@@ -1030,17 +1028,16 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
         sysroots_files[sysroot] = prefix_files(sysroot)
     sysroots_files = OrderedDict(sorted(sysroots_files.items(), key=lambda x: -len(x[1])))
     for index, sysroot in enumerate(sysroots_files):
-        path_replacements['sysroot'+str(index)] = {sysroot: sysroot_sub[:0]+str(index)}
+        path_replacements['sysroot' + str(index)] = {sysroot: sysroot_sub[:0] + str(index)}
         if 'Windows' in sysroot and len(sysroots_files):
             path_replacements['windowsroot'] = {sysroot: sysroot_sub[:0] + str(index)}
 
     # file_info collects any and all information about the files present.
     # Process only the packaged files.
     file_info = dict()
-    program_files = [f for f in files if (
-            codefile_type(join(run_prefix, f))
-            or codefile_type(join(run_prefix, f)) in filetypes_for_platform[subdir.split('-')[0]]) \
-            or f.endswith(('.a', '.lib'))]
+    program_files = [f for f in files if (codefile_type(join(run_prefix, f)) or
+                     codefile_type(join(run_prefix, f)) in filetypes_for_platform[subdir.split('-')[0]]) or
+                     f.endswith(('.a', '.lib'))]
 
     # We care only for created program binaries (exes and DSOs) and static libs
     program_files = [p for p in program_files if not p.endswith('.debug')]
@@ -1105,13 +1102,13 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number, subdi
 
     for f in program_files:
         fi = file_info[f]
-        if not 'filetype' in fi:
+        if 'filetype' not in fi:
             continue
         filetype = fi['filetype']
-        path = join(run_prefix, f)
-        #filetype = codefile_type(path)
-        #if not filetype or filetype not in filetypes_for_platform[subdir.split('-')[0]]:
-        #    continue
+        # path = join(run_prefix, f)
+        # filetype = codefile_type(path)
+        # if not filetype or filetype not in filetypes_for_platform[subdir.split('-')[0]]:
+        #     continue
         if not filetype or filetype not in filetypes_for_platform[subdir.split('-')[0]]:
             continue
         needed = fi['libraries']['resolved']
@@ -1247,7 +1244,6 @@ def post_build(m, files, build_python, host_prefix=None, is_already_linked=False
         for f in files:
             make_hardlink_copy(f, host_prefix)
 
-    cwda = os.getcwd()
     if not m.config.target_subdir.startswith('win'):
         osx_is_app = (m.config.target_subdir == 'osx-64' and
                       bool(m.get_value('build/osx_is_app', False)))
@@ -1366,21 +1362,20 @@ def make_sysroot_path_list(sysroot, subdir, whitelist):
         glob_ext = '*.so*'
 
     root = Path(sysroot)
-    dsos_re = re.compile('('+'|'.join('^' + translate(dso) + '$' for dso in whitelist)+')',
+    dsos_re = re.compile('(' + '|'.join('^' + translate(dso) + '$' for dso in whitelist) + ')',
                          re.IGNORECASE if not subdir.startswith('linux') else 0)
     matches = []
     exts = (glob_ext,)
     for ext in exts:
-        for subp in root.rglob(ext): # glob_ext):  # recursively iterate all items matching the glob pattern
+        for subp in root.rglob(ext):  # recursively iterate all items matching the glob pattern
             if subp.is_dir():
                 continue
             rela = subp.relative_to(root).as_posix()
-            if re.match(dsos_re, '/'+rela):
-                matches.append(PurePath('/'+rela))
+            if re.match(dsos_re, '/' + rela):
+                matches.append(PurePath('/' + rela))
     # It might be sensible at this point to try to 'unbake' the result back to the glob that created it, or
     # do we just want a big old superset of all the DLLs we've ever seen that grows and grows?
     return tuple(matches)
-
 
 
 def _native_subdir():
@@ -1409,7 +1404,7 @@ def sysroot_path_list(subdir, sysroot=None, whitelist_forcing_rescan=None):
         matches = make_sysroot_path_list(sysroot, subdir, whitelist_forcing_rescan)
 
     module_name = 'conda_build.post.baked_sysroot_pathlists'
-    module_path = join(dirname(__file__), 'baked_sysroot_pathlists', subdir.replace('-', '_')+'.py')
+    module_path = join(dirname(__file__), 'baked_sysroot_pathlists', subdir.replace('-', '_') + '.py')
 
     if not exists(module_path):
         return matches
@@ -1441,8 +1436,8 @@ def sysroot_path_list(subdir, sysroot=None, whitelist_forcing_rescan=None):
 def bake_sys_platform_sysroot_path_list(sysroot=None):
     subdir = _native_subdir()
     if subdir.startswith('win'):
-        if not sysroot: sysroot = os.environ['windir']
-        glob_ext = '*.dll'
+        if not sysroot:
+            sysroot = os.environ['windir']
         whitelist = DEFAULT_WIN_WHITELIST
         baked_name = 'DEFAULT_WIN_WHITELIST_BAKED'
     elif subdir == 'osx-64':
@@ -1451,7 +1446,8 @@ def bake_sys_platform_sysroot_path_list(sysroot=None):
         # hard-code it.
         # If we go above 10.9 we need to pretend that tbd files are dylibs and do some
         # horrible swapping between them and system dylibs at some stage.
-        if not sysroot: sysroot = '/opt/MacOSX10.9.sdk'
+        if not sysroot:
+            sysroot = '/opt/MacOSX10.9.sdk'
         whitelist = DEFAULT_MAC_WHITELIST
         baked_name = 'DEFAULT_MAC_WHITELIST_BAKED'
     else:
@@ -1469,9 +1465,10 @@ def bake_sys_platform_sysroot_path_list(sysroot=None):
             f.write("{}=(".format(baked_name))
             f.write(',\n'.join("{spacing}PurePath('{as_posix}')".format(
                     as_posix=m.as_posix(),
-                    spacing=' '*(len(baked_name)+2) if m != matches[0] else '')
+                    spacing=' ' * (len(baked_name) + 2) if m != matches[0] else '')
                     for m in matches))
             f.write(")")
+
 
 '''
 if __name__ == 'conda_build.post' or __name__ == '__main__':
