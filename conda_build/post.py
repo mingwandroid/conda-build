@@ -396,9 +396,9 @@ def osx_ch_link(path, link_dict, host_prefix, build_prefix, files):
 
 def mk_relative_osx(path, host_prefix, build_prefix, files, rpaths=('lib',)):
     assert sys.platform == 'darwin'
-
-    names = macho.otool(path, build_prefix)
-    s = macho.install_name_change(path, build_prefix,
+    prefix = build_prefix if os.path.exists(build_prefix) else host_prefix
+    names = macho.otool(path, prefix)
+    s = macho.install_name_change(path, prefix,
                                   partial(osx_ch_link,
                                           host_prefix=host_prefix,
                                           build_prefix=build_prefix,
@@ -412,10 +412,10 @@ def mk_relative_osx(path, host_prefix, build_prefix, files, rpaths=('lib',)):
             # Escape hatch for when you really don't want any rpaths added.
             if rpath == '':
                 continue
-            rpath_new = os.path.join('@loader_path',
-                                     os.path.relpath(os.path.join(host_prefix, rpath), os.path.dirname(path)),
-                                     '').replace('/./', '/')
-            macho.add_rpath(path, rpath_new, build_prefix=build_prefix, verbose=True)
+            rpath_new = join('@loader_path',
+                             relpath(join(host_prefix, rpath), dirname(path)),
+                             '').replace('/./', '/')
+            macho.add_rpath(path, rpath_new, build_prefix=prefix, verbose=True)
     if s:
         # Skip for stub files, which have to use binary_has_prefix_files to be
         # made relocatable.
