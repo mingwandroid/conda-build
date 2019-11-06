@@ -163,8 +163,20 @@ def otool(path, build_prefix=None, cb_filter=is_dylib_info):
     Any key values that can be converted to integers are converted
     to integers, the rest are strings.
     """
-    lines = check_output([find_preferably_prefixed_executable('otool', build_prefix), '-l', path],
-                          stderr=STDOUT).decode('utf-8')
+    otool = find_preferably_prefixed_executable('otool', build_prefix)
+    try:
+        if '/usr/bin' in otool:
+            with open(otool, 'rb') as f:
+                s = f.read()
+            if s.find(b'usr/lib/libxcselect.dylib') != -1:
+                # This is not the real `otool`.
+                raise
+        lines = check_output([otool, '-l', path],
+                              stderr=STDOUT).decode('utf-8')
+    except Exception as e:
+        print("ERROR :: Failed to run `otool`.  Please use `conda` to install `cctools` into your base environment.\n" \
+              "         An alternative option for users of macOS is to install `Xcode` or `Command Line Tools for Xcode`.")
+        sys.exit(1)
     # llvm-objdump returns 0 for some things that are anything but successful completion.
     lines_split = lines.splitlines()
     # 'invalid', 'expected' and 'unexpected' are too generic
