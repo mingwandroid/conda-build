@@ -3,6 +3,7 @@ try:
 except ImportError:
     from collections import Hashable
 from functools import partial
+import copy
 import glob2
 import hashlib
 import json
@@ -1014,7 +1015,7 @@ def _get_arch_if_native(arch):
 
 
 @memoized_by_arg0_filehash
-def lief_parse(filename, path_replacements={}):
+def lief_parse_internal(filename, path_replacements={}):
     '''
     Parses DSOs using LIEF (or pyldd) into the same structure.
     This ensures that LIEF isn't called more than once per file and
@@ -1026,7 +1027,8 @@ def lief_parse(filename, path_replacements={}):
     :param filename: File to collect DSO information about.
     '''
 
-    check_pyldd = True
+    # check_pyldd = True
+    check_pyldd = False
 
     fullpath = os.path.normpath(filename)
     if filename.endswith(('.a', '.lib')):
@@ -1034,8 +1036,7 @@ def lief_parse(filename, path_replacements={}):
     binary = lief.parse(fullpath) if have_lief else None
     if not binary:
         # Static libs here. Remove this.
-        return {'fullpath': fullpath,
-                'filetype': None,
+        return {'filetype': None,
                 'rpaths': [],
                 'exports': get_exports(fullpath),
                 'key': fullpath,
@@ -1056,6 +1057,16 @@ def lief_parse(filename, path_replacements={}):
 
         default_paths = None
         filetype = None
+        try:
+            entrypoint = binary.entrypoint
+            for function in [f for f in binary.symbols if f.is_function]:
+                addr = binary.get_function_address(function.name)
+                print('function {} at addr {}'.format(function, addr))
+        except Exception as e:
+            print("no entrypoint for {}".format(filename))
+            raise e
+        else:
+            print("entrypoint for {} is {}".format(filename, entrypoint))
         if binary.format == lief.EXE_FORMATS.ELF:
             if binary.type == lief.ELF.ELF_CLASS.CLASS64:
                 default_paths = ['$SYSROOT/lib64', '$SYSROOT/usr/lib64', '$SYSROOT/lib', '$SYSROOT/usr/lib']
@@ -1068,8 +1079,7 @@ def lief_parse(filename, path_replacements={}):
         elif binary.format == lief.EXE_FORMATS.PE:
             filetype = 'pecoff'
 
-        result_lief = {'fullpath': fullpath,
-                       'filetype': filetype,
+        result_lief = {'filetype': filetype,
                        'rpaths': rpaths,
                        'runpaths': runpaths,
                        'exports': get_exports(binary),
@@ -1094,8 +1104,7 @@ def lief_parse(filename, path_replacements={}):
                 assert False, "I did not know this could happen!"
                 libs_original = tuple(f for f in libs_original if f != filename)
 
-            result_pyldd = {'fullpath': fullpath,
-                            'filetype': filetype,
+            result_pyldd = {'filetype': filetype,
                             'rpaths': cf.get_rpaths_transitive(),
                             'runpaths': cf.get_runpaths(),
                             'exports': None,
@@ -1112,7 +1121,7 @@ def lief_parse(filename, path_replacements={}):
 
     return result_pyldd
 
-def lief_parse(filename, path_replacements):
+def lief_parse(filename, path_replacements={}):
     result = copy.deepcopy(lief_parse_internal(filename, path_replacements))
     result['fullpath'] = os.path.normpath(filename)
     return result
