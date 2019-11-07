@@ -1059,9 +1059,17 @@ def lief_parse_internal(filename, path_replacements={}):
         filetype = None
         try:
             entrypoint = binary.entrypoint
-            for function in [f for f in binary.symbols if f.is_function]:
-                addr = binary.get_function_address(function.name)
-                print('function {} at addr {}'.format(function, addr))
+            for function in [f for f in binary.symbols if f.is_function and not f.imported]:
+                name = function.name
+                try:
+                    name_d = function.demangled_name
+                except:
+                    name_d = None
+                try:
+                    addr = binary.get_function_address(name_d or name)
+                    print('function {} at addr {}'.format(function, addr))
+                except:
+                    print('WARNING :: Failed to get address for {}'.format(function.name))
         except Exception as e:
             print("no entrypoint for {}".format(filename))
             raise e
@@ -1125,6 +1133,7 @@ def lief_parse(filename, path_replacements={}):
     result = copy.deepcopy(lief_parse_internal(filename, path_replacements))
     result['fullpath'] = os.path.normpath(filename)
     return result
+
 
 '''
 def parse_glibc_version_from_sym(version):
