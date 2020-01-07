@@ -193,67 +193,19 @@ class DummyPsutilProcess(object):
         return []
 
 
-def _setup_rewrite_pipe(env):
-    """Rewrite values of env variables back to $ENV in stdout
-
-    Takes output on the pipe and finds any env value
-    and rewrites it as the env key
-
-    Useful for replacing "~/conda/conda-bld/pkg_<date>/_h_place..." with "$PREFIX"
-
-    Returns an FD to be passed to Popen(stdout=...)
-    """
-    # replacements is the env dict reversed,
-    # ordered by the length of the value so that longer replacements
-    # always occur first in case of common prefixes
-    replacements = OrderedDict()
-    for k, v in sorted(env.items(), key=lambda kv: len(kv[1]), reverse=True):
-        replacements[v] = k
-
-    r_fd, w_fd = os.pipe()
-    r = os.fdopen(r_fd, 'rt')
-    if sys.platform == 'win32':
-        replacement_t = '%{}%'
-    else:
-        replacement_t = '${}'
-
-    def rewriter():
-        while True:
-            try:
-                line = r.readline()
-                if not line:
-                    # reading done
-                    r.close()
-                    os.close(w_fd)
-                    return
-                for s, key in replacements.items():
-                    line = line.replace(s, replacement_t.format(key))
-                sys.stdout.write(line)
-            except UnicodeDecodeError:
-                try:
-                    txt = os.read(r, 10000)
-                    sys.stdout.write(txt or '')
-                except TypeError:
-                    pass
-
-    t = Thread(target=rewriter)
-    t.daemon = True
-    t.start()
-
-    return w_fd
-
-
 class PopenWrapper(object):
     # Small wrapper around subprocess.Popen to allow memory usage monitoring
     # copied from ProtoCI, https://github.com/ContinuumIO/ProtoCI/blob/59159bc2c9f991fbfa5e398b6bb066d7417583ec/protoci/build2.py#L20  # NOQA
 
-    def __init__(self, *args, **kwargs):
-        self.elapsed = None
-        self.rss = 0
-        self.vms = 0
+    def __init__(self, stats, *args, **kwargs):
         self.returncode = None
-        self.disk = 0
-        self.processes = 1
+        self.stats = stats
+        if self.stats:
+            self.elapsed = None
+            self.rss = 0
+            self.vms = 0
+            self.disk = 0
+            self.processes = 1
 
         self.out, self.err = self._execute(*args, **kwargs)
 
@@ -287,61 +239,234 @@ class PopenWrapper(object):
                 # We need to get all of the children of our process since our
                 # process spawns other processes.  Collect all of the child
                 # processes
+                if self.stats:
+                    rss = 0
+                    vms = 0
+                    processes = 0
+                    # We use the parent process to get mem usage of all spawned processes
+                    for child in parent.children(recursive=True):
+                        child_cpu_usage = cpu_usage.get(child.pid, {})
+                        try:
+                            mem = child.memory_info()
+                            rss += mem.rss
+                            vms += mem.rss
+                            # listing child times are only available on linux, so we don't use them.
+                            #    we are instead looping over children and getting each individually.
+                            #    https://psutil.readthedocs.io/en/latest/#psutil.Process.cpu_times
+                            cpu_stats = child.cpu_times()
+                            child_cpu_usage['sys'] = cpu_stats.system
+                            child_cpu_usage['user'] = cpu_stats.user
+                            cpu_usage[child.pid] = child_cpu_usage
+                        except psutil_exceptions:
+                            # process already died.  Just ignore it.
+                            continue
+                        processes += 1
 
-                rss = 0
-                vms = 0
-                processes = 0
-                # We use the parent process to get mem usage of all spawned processes
-                for child in parent.children(recursive=True):
-                    child_cpu_usage = cpu_usage.get(child.pid, {})
-                    try:
-                        mem = child.memory_info()
-                        rss += mem.rss
-                        vms += mem.rss
-                        # listing child times are only available on linux, so we don't use them.
-                        #    we are instead looping over children and getting each individually.
-                        #    https://psutil.readthedocs.io/en/latest/#psutil.Process.cpu_times
-                        cpu_stats = child.cpu_times()
-                        child_cpu_usage['sys'] = cpu_stats.system
-                        child_cpu_usage['user'] = cpu_stats.user
-                        cpu_usage[child.pid] = child_cpu_usage
-                    except psutil_exceptions:
-                        # process already died.  Just ignore it.
-                        continue
-                    processes += 1
+                if self.stats:
+                    # Sum the memory usage of all the children together (2D columnwise sum)
+                    self.rss = max(rss, self.rss)
+                    self.vms = max(vms, self.vms)
+                    self.cpu_sys = sum(child['sys'] for child in cpu_usage.values())
+                    self.cpu_user = sum(child['user'] for child in cpu_usage.values())
+                    self.processes = max(processes, self.processes)
 
-                # Sum the memory usage of all the children together (2D columnwise sum)
-                self.rss = max(rss, self.rss)
-                self.vms = max(vms, self.vms)
-                self.cpu_sys = sum(child['sys'] for child in cpu_usage.values())
-                self.cpu_user = sum(child['user'] for child in cpu_usage.values())
-                self.processes = max(processes, self.processes)
+                    # Get disk usage
+                    self.disk = max(directory_size(disk_usage_dir), self.disk)
 
-                # Get disk usage
-                self.disk = max(directory_size(disk_usage_dir), self.disk)
-
-                time.sleep(time_int)
-                self.elapsed = time.time() - start_time
+                    time.sleep(time_int)
+                    self.elapsed = time.time() - start_time
                 self.returncode = _popen.poll()
 
         except KeyboardInterrupt:
             _popen.kill()
             raise
 
-        self.disk = max(directory_size(disk_usage_dir), self.disk)
-        self.elapsed = time.time() - start_time
+        if self.stats:
+            self.disk = max(directory_size(disk_usage_dir), self.disk)
+            self.elapsed = time.time() - start_time
         return _popen.stdout, _popen.stderr
 
     def __repr__(self):
-        return str({'elapsed': self.elapsed,
-                    'rss': self.rss,
-                    'vms': self.vms,
-                    'disk': self.disk,
-                    'processes': self.processes,
-                    'cpu_user': self.cpu_user,
-                    'cpu_sys': self.cpu_sys,
-                    'returncode': self.returncode})
+        if self.stats:
+            return str({'elapsed': self.elapsed,
+                        'rss': self.rss,
+                        'vms': self.vms,
+                        'disk': self.disk,
+                        'processes': self.processes,
+                        'cpu_user': self.cpu_user,
+                        'cpu_sys': self.cpu_sys,
+                        'returncode': self.returncode})
+        else:
+            return str({'returncode': self.returncode})
 
+
+from os import unlink
+from subprocess import Popen, PIPE
+from threading import Thread
+try:
+    from queue import Queue
+except ImportError:
+    from Queue import Queue  # python 2.x
+import sys
+from collections import OrderedDict
+
+
+def reader(pipe, queue):
+    try:
+        with pipe:
+            for line in iter(pipe.readline, b''):
+                queue.put((pipe, line))
+    finally:
+        queue.put(None)
+
+
+def writer(logged_rewriter):
+    OUTCOL = '\033[92m'
+    ERRCOL = '\033[91m'
+    ENDCOL = '\033[0m'
+    if 'queue' not in logged_rewriter:
+        print("ERROR :: No queue")
+        sys.exit(-1)
+    queue = logged_rewriter['queue']
+    process_stdout = logged_rewriter['process_stdout']
+    process_stderr = logged_rewriter['process_stderr']
+    log = logged_rewriter['log']
+    log_stdout = logged_rewriter['log_stdout']
+    log_stderr = logged_rewriter['log_stderr']
+    replacements = logged_rewriter['replacements']
+    for _ in range(2):
+        for source, line in iter(queue.get, None):
+            for s, key in replacements.items():
+                line = line.replace(s, key)
+            if source == process_stdout:
+                # sys.stdout.write(OUTCOL + "{}".format(line.decode('utf-8')) + ENDCOL)
+                process_stdout.write(OUTCOL + "{}".format(line.decode('utf-8')) + ENDCOL)
+                if log:
+                    log.write(line)
+                if log_stdout:
+                    log_stdout.write(line)
+            elif source == process_stderr:
+                sys.stderr.write(ERRCOL + "{}".format(line.decode('utf-8')) + ENDCOL)
+                if log:
+                    log.write(line)
+                if log_stderr:
+                    log_stderr.write(line)
+    if log:
+        log.close()
+    if log_stdout and log_stdout != sys.stdout:
+        log_stdout.close()
+    if log_stderr and log_stderr != sys.stderr:
+        log_stderr.close()
+
+
+def _create_process_pipes():
+    r_fd, w_fd = os.pipe()
+    r = os.fdopen(r_fd, 'rb')
+    return w_fd, r
+
+
+def _setup_process_pipes(process_stdout, process_stderr, rewrite_env = None,
+                         log_file = None, log_stdout_file = None, log_stderr_file = None):
+    # A dict to collect all necessary information:
+    logged_rewriter = {}
+    # if not rewrite_env and not log_file and not log_stdout_file and not log_stderr_file:
+    #     return logged_rewriter
+    logged_rewriter['process_stdout'] = process_stdout
+    logged_rewriter['process_stderr'] = process_stderr
+    q = Queue()
+    log = None
+    log_stdout = None
+    log_stderr = None
+    if log_file:
+        log = open(log_file, 'ab+')
+    if log_stdout_file:
+        log_stdout = open(log_stdout_file, 'ab+')
+    if log_stderr_file:
+        log_stderr = open(log_stderr_file, 'ab+')
+    logged_rewriter['log'] = log
+    logged_rewriter['log_stdout'] = log_stdout
+    logged_rewriter['log_stderr'] = log_stderr
+    logged_rewriter['queue'] = q
+    replacements = OrderedDict()
+    replacement_t = '%{}%' if sys.platform == 'win32' else '${}'
+    if rewrite_env:
+        for k, v in sorted(rewrite_env.items(), key=lambda kv: len(kv[1]), reverse=True):
+            k = replacement_t.format(str(k)).encode('utf-8')
+            v = v.encode('utf-8')
+            replacements[v] = k
+    logged_rewriter['replacements'] = replacements
+    t = Thread(target=writer, args=[logged_rewriter])
+    t.daemon = True
+    t.start()
+    t = Thread(target=reader, args=[process_stdout, q])
+    t.daemon = True
+    t.start()
+    t = Thread(target=reader, args=[process_stderr, q])
+    t.daemon = True
+    t.start()
+    return logged_rewriter
+
+
+'''
+def rewrite_and_log_process(logged_rewriter):
+    OUTCOL = '\033[92m'
+    ERRCOL = '\033[91m'
+    ENDCOL = '\033[0m'
+    if 'queue' not in logged_rewriter:
+        print("ERROR :: No queue nor process")
+        sys.exit(-1)
+    queue = logged_rewriter['queue']
+    process_stdout = logged_rewriter['process_stdout']
+    process_stderr = logged_rewriter['process_stderr']
+    log = logged_rewriter['log']
+    log_stdout = logged_rewriter['log_stdout']
+    log_stderr = logged_rewriter['log_stderr']
+    replacements = logged_rewriter['replacements']
+    for _ in range(2):
+        for source, line in iter(queue.get, None):
+            for s, key in replacements.items():
+                line = line.replace(s, key)
+            if source == process_stdout:
+                sys.stdout.write(OUTCOL + "{}".format(line.decode('utf-8')) + ENDCOL)
+                if log:
+                    log.write(line)
+                if log_stdout:
+                    log_stdout.write(line)
+            elif source == process_stderr:
+                sys.stderr.write(ERRCOL + "{}".format(line.decode('utf-8')) + ENDCOL)
+                if log:
+                    log.write(line)
+                if log_stderr:
+                    log_stderr.write(line)
+    if log:
+        log.close()
+    if log_stdout:
+        log_stdout.close()
+    if log_stderr:
+        log_stderr.close()
+'''
+'''
+# 'C:\\msys32\\usr\\bin\\ls.exe'
+log = 'C:\\Users\\rdonnelly\\print-stdout-stderr.log'
+log_stdout = 'C:\\Users\\rdonnelly\\print-stdout-stderr.stdout.log'
+log_stderr = 'C:\\Users\\rdonnelly\\print-stdout-stderr.stderr.log'
+try:
+    unlink(log)
+except:
+    pass
+try:
+    unlink(log_stdout)
+except:
+    pass
+try:
+    unlink(log_stderr)
+except:
+    pass
+process = Popen(['C:\\Users\\rdonnelly\\print-stdout-stderr.exe'], stdout=PIPE, stderr=PIPE, bufsize=1)
+rewrite_env = {'PERSON': 'world'}
+logged_rewriter = _setup_process_pipes(process.stdout, process.stderr, rewrite_env, log, log_stdout, log_stderr)
+# rewrite_and_log_process(logged_rewriter)
+'''
 
 def _func_defaulting_env_to_os_environ(func, *popenargs, **kwargs):
     if 'env' not in kwargs:
@@ -365,32 +490,41 @@ def _func_defaulting_env_to_os_environ(func, *popenargs, **kwargs):
         del kwargs['stats']
 
     rewrite_stdout_env = kwargs.pop('rewrite_stdout_env', None)
-    if rewrite_stdout_env:
-        kwargs['stdout'] = _setup_rewrite_pipe(rewrite_stdout_env)
 
     out = None
-    if stats is not None:
-        proc = PopenWrapper(_args, **kwargs)
-        if func == 'output':
-            out = proc.out.read()
-
-        if proc.returncode != 0:
-            raise subprocess.CalledProcessError(proc.returncode, _args)
-
-        stats.update({'elapsed': proc.elapsed,
-                    'disk': proc.disk,
-                    'processes': proc.processes,
-                    'cpu_user': proc.cpu_user,
-                    'cpu_sys': proc.cpu_sys,
-                    'rss': proc.rss,
-                    'vms': proc.vms})
+    DEVNULL_to_close = None
+    if func == 'call' and False:
+        # if sys.version[0] == '2':
+        #     DEVNULL = open(os.devnull, 'w')
+        #     DEVNULL_to_close = DEVNULL
+        # else:
+        #     DEVNULL = subprocess.DEVNULL
+        # kwargs['stdout'] = DEVNULL
+        # kwargs['stderr'] = DEVNULL
+        kwargs['stdout'] = sys.stdout
+        kwargs['stderr'] = sys.stderr
     else:
-        if func == 'call':
-            subprocess.check_call(_args, **kwargs)
-        else:
-            if 'stdout' in kwargs:
-                del kwargs['stdout']
-            out = subprocess.check_output(_args, **kwargs)
+        kwargs['stdout'], stdout_pipe = _create_process_pipes()
+        kwargs['stderr'], stderr_pipe = _create_process_pipes()
+        logged_rewriter = _setup_process_pipes(stdout_pipe, stderr_pipe, rewrite_stdout_env,
+                                               None, None, None)
+
+    proc = PopenWrapper(True, _args, **kwargs)
+    out2 = proc.out.read()
+    if func == 'output':
+        out = out2
+
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, _args)
+    if stats is not None:
+        stats.update({'elapsed': proc.elapsed,
+                      'disk': proc.disk,
+                      'processes': proc.processes,
+                      'cpu_user': proc.cpu_user,
+                      'cpu_sys': proc.cpu_sys,
+                      'rss': proc.rss,
+                      'vms': proc.vms})
+
     return out
 
 
@@ -638,6 +772,48 @@ def copytree(src, dst, symlinks=False, ignore=None, dry_run=False):
     return dst_lst
 
 
+def is_case_sensitive(path):
+    with temp(path) as tmppath:
+        head, tail = os.path.split(tmppath)
+        testpath = os.path.join(head, tail.upper())
+        return not os.path.exists(testpath)
+
+def is_fs_case_sensitive(path):
+    #
+    # Force case with the prefix
+    #
+    with tempfile.NamedTemporaryFile(prefix='TmP',dir=path) as tmp_file:
+        return(not os.path.exists(tmp_file.name.lower()))
+
+def dir_is_writable_and_case_sensitive(dir):
+    import uuid
+    id = str(uuid.uuid4())
+    tst_a = os.path.join(dir, 'a' + id)
+    tst_A = os.path.join(dir, 'A' + id)
+    res = True
+    try:
+        try:
+            with open(tst_a, 'wb') as f:
+                f.write(b'a')
+        except:
+            res = False
+        try:
+            with open(tst_A, 'wb') as f:
+                f.write(b'A')
+        except:
+            pass
+        with open(tst_a, 'rb') as f:
+            c = f.read()
+            if c == b'A':
+                res = False
+        return res
+    finally:
+        if os.path.exists(tst_a):
+            os.unlink(tst_a)
+        if os.path.exists(tst_A):
+            os.unlink(tst_A)
+
+
 def merge_tree(src, dst, symlinks=False, timeout=900, lock=None, locking=True, clobber=False):
     """
     Merge src into dst recursively by copying all files from src into dst.
@@ -646,8 +822,27 @@ def merge_tree(src, dst, symlinks=False, timeout=900, lock=None, locking=True, c
     Like copytree(src, dst), but raises an error if merging the two trees
     would overwrite any files.
     """
-    dst = os.path.normpath(os.path.normcase(dst))
-    src = os.path.normpath(os.path.normcase(src))
+    from conda_build.utils import dir_is_writable_and_case_sensitive
+
+    if os.path.normcase(src) != src:
+        dir_dst = os.path.dirname(dst)
+        made_dst = False
+        if not os.path.exists(dir_dst):
+            os.makedirs(dir_dst, mode = 0o777, exist_ok = False)
+            made_dst = True
+        if 'CMakeLists.txt' in src:
+            dst_cs = False
+            src_cs = True
+        else:
+            dst_cs = dir_is_writable_and_case_sensitive(dir_dst)
+            src_cs = dir_is_writable_and_case_sensitive(os.path.dirname(src))
+        if src_cs and not dst_cs:
+            print("WARNING :: Case-sensitive source file {} being copied to non case-sensitive destination.".format(
+                src))
+        if made_dst:
+            rm_rf(dir_dst)
+    dst = os.path.normpath(dst)
+    src = os.path.normpath(src)
     assert not dst.startswith(src), ("Can't merge/copy source into subdirectory of itself.  "
                                      "Please create separate spaces for these things.\n"
                                      "  src: {0}\n"

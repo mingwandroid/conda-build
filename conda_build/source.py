@@ -516,7 +516,7 @@ def _guess_patch_strip_level(filesstr, src_dir):
     if maxlevel == 0:
         patchlevel = 0
     else:
-        histo = dict()
+        # histo = dict()
         histo = {i: 0 for i in range(maxlevel + 1)}
         for file in files:
             parts = file.split(b'/')

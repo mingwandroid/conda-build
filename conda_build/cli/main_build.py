@@ -46,6 +46,18 @@ different sets of packages."""
         help="Only check (validate) the recipe.",
     )
     p.add_argument(
+        "--log-file",
+        help="Write (filtered) stdout and stderr to log-file.",
+    )
+    p.add_argument(
+        "--log-file-stdout",
+        help="Write (filtered) stdout to log-file-stdout.",
+    )
+    p.add_argument(
+        "--log-file-stderr",
+        help="Write (filtered) stderr to log-file-stderr.",
+    )
+    p.add_argument(
         "--no-anaconda-upload",
         action="store_false",
         help="Do not ask to upload the package to anaconda.org.",
