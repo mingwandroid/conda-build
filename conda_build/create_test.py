@@ -241,6 +241,7 @@ def create_lua_files(m, test_dir=None):
 def create_all_test_files(m, test_dir=None):
     if test_dir:
         rm_rf(test_dir)
+        assert not os.path.isdir(test_dir), 'rm_rf(test_dir={}) failed'.format(test_dir)
         os.makedirs(test_dir)
         # this happens when we're finishing the build.
         test_deps = m.meta.get('test', {}).get('requires', [])
