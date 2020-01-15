@@ -1234,21 +1234,35 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
 
     pkg_vendored_dist, pkg_vendoring_key = _get_fake_pkg_dist(pkg_name, pkg_version, build_str, build_number)
     # Used to detect overlinking (finally)
-    packages_run = dists_from_names([req.split(' ')[0] for req in requirements_run], run_prefix) + [pkg_vendored_dist]
-    packages_build = dists_from_names([req.split(' ')[0] for req in requirements_build], build_prefix)
-    packages_all = packages_run + packages_build
-    package_nature_run = {package: library_nature(package, run_prefix, target_subdir, bldpkgs_dirs, output_folder, channel_urls)
-                      for package in packages_run}
-    package_nature_build = {package: library_nature(package, build_prefix, build_subdir, bldpkgs_dirs, output_folder, channel_urls)
-                      for package in packages_build}
-    package_nature = {**package_nature_run, **package_nature_build}
-    lib_packages_run = set([package for package in packages_run
-                          if package_nature[package] != 'non-library' or isinstance(package, FakeDist)])
-    lib_packages = set([package for package in packages_all
-                        if package_nature[package] != 'non-library'])
+    # This only gives direct dependencies.
+    packages_run_direct = dists_from_names([req.split(' ')[0] for req in requirements_run], run_prefix) + [pkg_vendored_dist]
+    packages_build_direct = dists_from_names([req.split(' ')[0] for req in requirements_build], build_prefix)
+    packages_present = {}
+    for prefix in (run_prefix, build_prefix):
+        packages = [k for k, v in linked_data(prefix).items()]
+        if prefix == run_prefix:
+            packages += [pkg_vendored_dist]
+        for package in packages:
+            # A package can be in multiple prefixes and we keep track of that.
+            if not 'package' in packages_present:
+                packages_present[package] = {'package': package}
+            if not 'prefixes' in packages_present[package]:
+                packages_present[package]['prefixes'] = [prefix]
+            else:
+                packages_present[package]['prefixes'].append(prefix)
+            packages_present[package]['direct_dep'] = package in packages_run_direct or package in packages_build_direct
+            packages_present[package]['build_dep'] = prefix == build_prefix
+            packages_present[package]['run_dep'] = prefix == run_prefix
+            packages_present[package]['nature'] = library_nature(package, prefix, target_subdir,
+                                                                 bldpkgs_dirs, output_folder, channel_urls)
+    lib_packages = [package for package, vals in packages_present.items()
+                    if (vals['nature'] != 'non-library' or isinstance(package, FakeDist))]
+    lib_packages_run = [package for package, vals in packages_present.items()
+                        if (vals['nature'] != 'non-library' or isinstance(package, FakeDist)) and
+                        run_prefix in vals['prefixes']]
     # The last package of packages_run is this package itself, add it as being used
     # in case it qualifies as a library package.
-    lib_packages_used = set((packages_run[-1],))
+    lib_packages_used = set(lib_packages_run)
 
     sysroot_sub = '$SYSROOT'
     buildprefix_sub = '$BUILDPREFIX'
@@ -1359,7 +1373,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
 
     # glibc is special. It is in gcc, but at runtime its always loaded from the system, so we remove it.
     packages_used = set([package for package in packages_used
-                        if (package_nature[package] != 'glibc-providing library')])
+                        if (packages_present[package]['nature'] != 'glibc-providing library')])
 
     if packages_used != lib_packages_run:
         info_prelude = "   INFO ({})".format(pkg_name)
