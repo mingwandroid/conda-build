@@ -288,14 +288,14 @@ def from_os_varnames(binary_format, binary_type, input_):
 # TODO :: Use conda's version of this (or move the constant strings into constants.py)
 def _get_path_dirs(prefix, subdir):
     if subdir.startswith('win'):
-        yield '/'.join((prefix,))
-        yield '/'.join((prefix, 'Library', 'mingw-w64', 'bin'))
-        yield '/'.join((prefix, 'Library', 'usr', 'bin'))
-        yield '/'.join((prefix, 'Library', 'bin'))
-        yield '/'.join((prefix, 'Scripts'))
-        yield '/'.join((prefix, 'bin'))
+        yield os.sep.join((prefix,))
+        yield os.sep.join((prefix, 'Library', 'mingw-w64', 'bin'))
+        yield os.sep.join((prefix, 'Library', 'usr', 'bin'))
+        yield os.sep.join((prefix, 'Library', 'bin'))
+        yield os.sep.join((prefix, 'Scripts'))
+        yield os.sep.join((prefix, 'bin'))
     else:
-        yield '/'.join((prefix, 'bin'))
+        yield os.sep.join((prefix, 'bin'))
 
 
 def get_uniqueness_key(file):
