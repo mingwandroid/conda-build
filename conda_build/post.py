@@ -1705,8 +1705,9 @@ def sysroot_path_list(subdir, sysroot=None, sysroot_base='', whitelist_forcing_r
             "files": baked if baked else matches}
 
 
-def bake_sys_platform_sysroot_path_list(sysroot=None):
-    subdir = _native_subdir()
+def bake_sys_platform_sysroot_path_list(sysroot=None, subdir=None):
+    if not subdir:
+        subdir = _native_subdir()
     if subdir.startswith('win'):
         if not sysroot:
             sysroot = os.path.join(os.environ['windir'], 'System32')
@@ -1747,7 +1748,11 @@ def bake_sys_platform_sysroot_path_list(sysroot=None):
 
 '''
 if __name__ == 'conda_build.post' or __name__ == '__main__':
-    bake_sys_platform_sysroot_path_list()
+    if sys.platform.startswith('win'):
+        bake_sys_platform_sysroot_path_list('C:/Windows/System32/', 'win-64')
+        bake_sys_platform_sysroot_path_list('C:/Windows/SysWOW64/', 'win-32')
+    else:
+        bake_sys_platform_sysroot_path_list()
     # matches = make_sysroot_path_list('C:/Windows/System32', 'win-64', DEFAULT_WIN_WHITELIST)
     # print(len(matches))5
     # print(matches)
