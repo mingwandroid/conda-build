@@ -1141,7 +1141,7 @@ class FrozenDict(Mapping):
 def fullpath_for_prefix_and_files(prefix_and_files, file):
     return os.path.join(prefix_and_files['prefix'],
                         prefix_and_files['sysroot_base'] if 'sysroot_base' in prefix_and_files else '',
-                        str(file).lstrip('/'))
+                        str(file).lstrip(os.sep))
 
 
 def liefify(path_groups, pickle_cache):
@@ -1210,7 +1210,6 @@ def liefify(path_groups, pickle_cache):
 
 
 def _check_file_info(f, file_info):
-    return
     if file_info['fullpath'].startswith('ld-'):
         return
     if (not file_info['key'].startswith(os.path.basename(file_info['fullpath'])) and
@@ -1293,14 +1292,19 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
                 sysroot_bases = ['']
             sysroots = [sysroot_prefix for _ in sysroot_bases]
         elif target_subdir.startswith('win'):
-            sysroots = ['C:/Windows/System32']
+            # We should be parsing SysWOW64 when subdir is 'win-32' and _native_subdir() is 'win-64'
+            if target_subdir.endswith('-32') and _native_subdir() == 'win-64':
+                sysroots = ['C:/Windows/SysWOW64/']
+            else:
+                sysroots = ['C:/Windows/System32/']
             sysroot_bases = ['']
         elif target_subdir.startswith('osx-64'):
             sysroot_bases = ['']
     srf = set()
     for sysroot_prefix, sysroot_base in zip(sysroots, sysroot_bases):
         sysroot_files = sysroot_path_list(target_subdir, sysroot_prefix, sysroot_base)
-        srf = srf.union(set([os.path.join(sysroot_prefix.replace('/', os.sep), f) for f in sysroot_files['files']]))
+        srf = srf.union(set([os.path.join(sysroot_prefix.replace('/', os.sep), f)
+                             for f in sysroot_files['files']]))
         path_groups['sysroot'] = sysroot_files
     # TODO :: Put everything in build_prefix that isn't in sysroot into 'build_prefix'
     ld_library_path = list(_get_path_dirs(run_prefix, target_subdir))
@@ -1312,10 +1316,11 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
                 ld_library_path += ['{sysroot}/usr/{lib}'.format(sysroot=pfx, lib=def_libdir)
                                     for def_libdir in def_libdirs]
             elif target_subdir.startswith('win'):
-                ld_library_path += [os.path.normpath(pfx),
-                                    os.path.dirname(pfx),
-                                    os.path.join(pfx, 'Wbem'),
-                                    os.path.join(pfx, 'WindowsPowerShell', 'v1.0')]
+                np = os.path.normpath(pfx)
+                ld_library_path += [np,
+                                    os.path.dirname(np),
+                                    os.path.join(np, 'Wbem'),
+                                    os.path.join(np, 'WindowsPowerShell', 'v1.0')]
     prefix_owners = _map_file_to_package(files + list(srf),
                                          run_prefix, build_prefix,
                                          pkg_vendored_dist, False)
@@ -1660,11 +1665,15 @@ def sysroot_path_list(subdir, sysroot=None, sysroot_base='', whitelist_forcing_r
     '''
     matches = None
     baked = None
+    force_rescan = whitelist_forcing_rescan or DEFAULT_WIN_WHITELIST
+    # (_native_subdir() == subdir and force_rescan)):
+    #
     if (subdir.startswith('linux') or
-            (_native_subdir() == subdir and whitelist_forcing_rescan)):
-        if subdir.startswith('linux') and not whitelist_forcing_rescan:
+        ((_native_subdir() == subdir or (_native_subdir().startswith('win') and subdir.startswith('win')))
+         and force_rescan)):
+        if subdir.startswith('linux') and not force_rescan:
             whitelist_forcing_rescan = ['**/*.so*']
-        matches = make_sysroot_path_list(os.path.join(sysroot, sysroot_base), subdir, whitelist_forcing_rescan)['files']
+        matches = make_sysroot_path_list(os.path.join(sysroot, sysroot_base), subdir, force_rescan)['files']
 
     module_name = 'conda_build.post.baked_sysroot_pathlists'
     module_path = join(dirname(__file__), 'baked_sysroot_pathlists', subdir.replace('-', '_') + '.py')
@@ -1687,8 +1696,9 @@ def sysroot_path_list(subdir, sysroot=None, sysroot_base='', whitelist_forcing_r
                 baked = getattr(baked_sysroot_pathlists, entry)
                 break
 
-    if matches and baked and matches != baked:
-        print("WARNING :: Mismatch between sysroot files\nbaked: {}, found: {}".format(baked, matches))
+    if matches and baked and set(matches) != set(baked):
+        print("WARNING :: Mismatch between sysroot files\n\nbaked:\n{}\n\nfound:\n{}\n"
+              .format('\n'.join(str(b) for b in baked), '\n'.join(str(m) for m in matches)))
 
     return {"prefix": os.path.normpath(sysroot) if sysroot else "",
             "sysroot_base": sysroot_base,
