@@ -31,7 +31,7 @@ except:
     pass
 
 # TODO :: Make this a hash of this file itself (or a split-off file with just the low-level LIEF + pickling code)
-lief_pickle_version = 3
+lief_pickle_version = 5
 
 def is_string(s):
     try:
@@ -1160,7 +1160,7 @@ def sha1_of(filename):
     return sha1.hexdigest()
 
 
-def lief_parse(filename, pickle_cache):
+def lief_parse(filename, unpicked_props, pickle_cache):
     pickled = os.path.join(pickle_cache,
                            (os.path.basename(filename) +
                             '_' +
@@ -1180,9 +1180,7 @@ def lief_parse(filename, pickle_cache):
         pickle.dump(result, open(pickled, 'wb'))
         result2 = pickle.load(open(pickled, 'rb'))
         assert result2 == result
-    result = copy.deepcopy(result)
-    result['fullpath'] = filename
-    return result
+    return dict(copy.deepcopy(result), **unpicked_props)
 
 
 '''
