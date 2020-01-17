@@ -708,7 +708,44 @@ def _get_rpaths(lib_info, selfdir):
     return rpaths
 
 
-def _resolve_needed_dsos(libs_info, ld_library_path, path_groups, verbose):
+class CaseInsensitively(object):
+    def __init__(self, s):
+        self.__s = s.lower()
+    def __hash__(self):
+        return hash(self.__s)
+    def __eq__(self, other):
+        # ensure proper comparison between instances of this class
+        try:
+           other = other.__s
+        except (TypeError, AttributeError):
+          try:
+             other = other.lower()
+          except:
+             pass
+        return self.__s == other
+    def lower(self):
+        return self.__s.lower()
+
+
+import collections
+
+class CaseInsensitiveDict(collections.Mapping):
+    def __init__(self, d):
+        self._d = d
+        self._s = dict((k.lower(), k) for k in d)
+    def __contains__(self, k):
+        return k.lower() in self._s
+    def __len__(self):
+        return len(self._s)
+    def __iter__(self):
+        return iter(self._s)
+    def __getitem__(self, k):
+        return self._d[self._s[k.lower()]]
+    def actual_key_case(self, k):
+        return self._s.get(k.lower())
+
+
+def _resolve_needed_dsos(libs_info, ld_library_path, path_groups, target_subdir, verbose):
     '''
     :param ld_library_path: An ordered list of directories to search for. This is modified and stored
                            with each DSO we process according to its RPATH entries. Recursion is not
@@ -723,6 +760,7 @@ def _resolve_needed_dsos(libs_info, ld_library_path, path_groups, verbose):
     '''
 
     res = {}
+    win_target = target_subdir.startswith('win')
 
     run_prefix = path_groups['run_prefix']['prefix']
     sysroot = os.path.join(path_groups['sysroot']['prefix'], path_groups['sysroot']['sysroot_base'])
@@ -765,8 +803,7 @@ def _resolve_needed_dsos(libs_info, ld_library_path, path_groups, verbose):
             default_paths = [dp.replace('$SYSROOT', sysroot)
                              for dp in lib_info['default_paths']]
             selfdir = os.path.dirname(lib_info['fullpath'])
-            rpaths = _get_rpaths(lib_info, selfdir)
-            print(ld_library_path)
+            rpaths = ld_library_path + _get_rpaths(lib_info, selfdir)
             res[key] = {'ld_library_path': rpaths,
                         # Resolved is a list of the same record type!
                         'resolved': []}
@@ -788,25 +825,32 @@ def _resolve_needed_dsos(libs_info, ld_library_path, path_groups, verbose):
                                 rp = os.path.relpath(fullpath, prefix_and_files['prefix'])
                                 break
                         if rp:
-                            if fullpath not in libs_info:
+                            ci_libs_info = CaseInsensitiveDict(libs_info) if win_target else libs_info
+                            ci_fullpath = CaseInsensitively(fullpath) if win_target else fullpath
+                            if ci_fullpath not in ci_libs_info:
                                 if f_is_in_run_prefix:
                                     print("ERROR :: Could not resolve {}, have not liefify'ed {}".format(lib, fullpath))
                                 elif verbose:
                                     print("WARNING :: Could not resolve {}, have not liefify'ed {}".format(lib, fullpath))
                             else:
-                                lib_info2 = libs_info[fullpath]
+                                lib_info2 = ci_libs_info[ci_fullpath]
                                 selfdir2 = os.path.dirname(lib_info2['fullpath'])
                                 rpaths2 = _get_rpaths(lib_info2, selfdir2)
                                 for f, fi in libs_info.items():
                                     _check_file_info(f, fi)
 
-                                res[lib_info2['key']] = {'ld_library_path': rpaths2 + parent_rpaths,
-                                                         # Resolved is a list of the same record type!
-                                                         'resolved': []}
-                                for f, fi in libs_info.items():
-                                    _check_file_info(f, fi)
+                                # If the same lib gets loaded from two different paths is it a problem? On all systems?
+                                if lib_info2['key'] not in res:
+                                    res[lib_info2['key']] = {'ld_library_path': rpaths2 + parent_rpaths,
+                                                             # Resolved is a list of the same record type!
+                                                             'resolved': []}
+                                    for f, fi in libs_info.items():
+                                        _check_file_info(f, fi)
+                                else:
+                                    print("When resolving for lib={} found lib_info2['key']={} already in res".format(lib, lib_info2['key']))
                                 lib_info['libraries']['resolved'].append(fullpath)
-                                todo.append(lib_info2)
+                                if lib_info2['do_not_recurse_into'] == False:
+                                    todo.append(lib_info2)
                                 already_seen.add(key)
                             break
                         else:
@@ -1161,8 +1205,9 @@ def liefify(path_groups, pickle_cache):
             else:
                 do_not_recurse_into = False
             program_files[fullpath] = {'do_not_recurse_into': do_not_recurse_into}
-    def lief_parse_this(filename, pickle_cache):
-        return lief_parse(filename, pickle_cache)
+
+    def lief_parse_this(filename, unpicked_props, pickle_cache):
+        return lief_parse(filename, unpicked_props, pickle_cache)
 
     timings = False
     # Parallel is a lot slower, 192 seconds vs 95 seconds!
@@ -1177,8 +1222,9 @@ def liefify(path_groups, pickle_cache):
     start = time.time()
     if serial:
         file_info_serial = dict()
-        for f, props in program_files.items():
-            file_info_serial[f] = lief_parse_this(f, pickle_cache)
+        for f, unpicked_props in program_files.items():
+            unpicked_props['fullpath'] = f
+            file_info_serial[f] = lief_parse_this(f, unpicked_props, pickle_cache)
     ends = time.time()
 
     if parallel:
@@ -1338,6 +1384,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
     _resolve_needed_dsos(file_info,
                          ld_library_path,
                          path_groups,
+                         target_subdir,
                          verbose)
 
     for f, fi in file_info.items():
