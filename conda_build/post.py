@@ -1095,15 +1095,18 @@ def calculate_packages_used(file_info, pkg_name, path_groups, whitelist, verbose
                 if resolved in file_info:
                     # Do I need to figure out which path_group it is in? Yes.
                     print("Found {} in file_info".format(resolved))
+                print("{} Needs {} .. ".format(f, resolved))
                 if resolved in prefix_for_file:
                     r_prefix_type_relpath = prefix_for_file[resolved]
                     r_prefix_type = r_prefix_type_relpath['prefix_type']
                     r_rp = r_prefix_type_relpath['relpath']
-                    pkg = file_info[resolved]['package']
-                    print(pkg)
-                    packages_used.add(pkg)
-                    print("{} uses {} from {}".format(rp, r_rp, r_prefix_type))
-                print("{} Needs {}".format(f, resolved))
+                    if 'package' in file_info[resolved]:
+                        pkg = file_info[resolved]['package']
+                        print(pkg)
+                        packages_used.add(pkg)
+                        print(" .. {} uses {} from {} in {}".format(rp, r_rp, pkg, r_prefix_type))
+                    else:
+                        print(" .. {} uses {} from {}".format(rp, r_rp, r_prefix_type))
             # This is nonsense! Should run a loop per resolved library instead.
             in_whitelist = any([fnmatch(resolved, w) for w in whitelist])
             if in_whitelist:
@@ -1427,7 +1430,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
     packages_used = set([package for package in packages_used
                         if (packages_present[package]['nature'] != 'glibc-providing library')])
 
-    if packages_used != lib_packages_run:
+    if False and packages_used != lib_packages_run:
         info_prelude = "   INFO ({})".format(pkg_name)
         warn_prelude = "WARNING ({})".format(pkg_name)
         err_prelude = "  ERROR ({})".format(pkg_name)
@@ -1445,7 +1448,7 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
                                "(i.e. it is overdepending or perhaps statically linked? "
                                "If that is what you want then add it to `build/ignore_run_exports`)"
                                .format(msg_prelude, package_nature[lib], lib), verbose=verbose)
-    if len(errors):
+    if False and len(errors):
         if exception_on_error:
             runpaths_errors = [error for error in errors if re.match(r".*runpaths.*found in.*", error)]
             if len(runpaths_errors):
