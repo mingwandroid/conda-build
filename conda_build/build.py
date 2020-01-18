@@ -2594,7 +2594,7 @@ def test(recipedir_or_package_or_metadata, config, stats, move_broken=True, prov
     # this is also copying tests/source_files from work_dir to testing workdir
 
     _, pl_files, py_files, r_files, lua_files, shell_files = create_all_test_files(metadata)
-    if not any([py_files, shell_files, pl_files, lua_files, r_files]):
+    if not any([py_files, shell_files, pl_files, lua_files, r_files]) and not metadata.config.test_run_post:
         print("Nothing to test for:", test_package_name)
         return True
 
@@ -2704,7 +2704,7 @@ def test(recipedir_or_package_or_metadata, config, stats, move_broken=True, prov
         post_build(metadata, files, None, metadata.config.test_prefix, True)
 
     # when workdir is removed, the source files are unavailable.  There's the test/source_files
-    #    entry that lets people keep these files around.  The files are copied into test_dir for
+    #    entry that lets people keep these files arou\nd.  The files are copied into test_dir for
     #    intuitive relative path behavior, though, not work_dir, so we need to adjust where
     #    SRC_DIR points.  The initial CWD during tests is test_dir.
     if metadata.config.remove_work_dir:
