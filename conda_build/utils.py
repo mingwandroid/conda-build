@@ -1831,9 +1831,12 @@ def sha256_checksum(filename, buffersize=65536):
 
 
 def write_bat_activation_text(file_handle, m):
+    conda_hook_bat = os.path.normpath(os.path.join(root_script_dir, '..', 'condabin', 'conda_hook.bat'))
+    conda_bat = os.path.normpath(os.path.join(root_script_dir, '..', 'condabin', 'conda.bat'))
+
     if conda_46:
-        file_handle.write('call "{conda_root}\\..\\condabin\\conda_hook.bat"\n'.format(
-            conda_root=root_script_dir,
+        file_handle.write('call "{conda_hook_bat}"\n'.format(
+            conda_hook_bat=conda_hook_bat,
         ))
     if m.is_cross:
         # HACK: we need both build and host envs "active" - i.e. on PATH,
@@ -1859,8 +1862,8 @@ def write_bat_activation_text(file_handle, m):
             open(history_file, 'a').close()
 
         if conda_46:
-            file_handle.write('call "{conda_root}\\..\\condabin\\conda.bat" activate "{prefix}"\n'.format(
-                conda_root=root_script_dir,
+            file_handle.write('call "{conda_bat}" activate "{prefix}"\n'.format(
+                conda_bat=conda_bat,
                 prefix=m.config.host_prefix,
             ))
         else:
@@ -1873,8 +1876,8 @@ def write_bat_activation_text(file_handle, m):
 
     # Write build prefix activation AFTER host prefix, so that its executables come first
     if conda_46:
-        file_handle.write('call "{conda_root}\\..\\condabin\\conda.bat" activate --stack "{prefix}"\n'.format(
-            conda_root=root_script_dir,
+        file_handle.write('call "{conda_bat}" activate --stack "{prefix}"\n'.format(
+            conda_bat=conda_bat,
             prefix=m.config.build_prefix,
         ))
     else:
