@@ -1866,6 +1866,7 @@ def write_bat_activation_text(file_handle, m):
                 conda_bat=conda_bat,
                 prefix=m.config.host_prefix,
             ))
+            file_handle.write('echo %PATH%\n')
         else:
             file_handle.write('call "{conda_root}\\activate.bat" "{prefix}"\n'.format(
                 conda_root=root_script_dir,
@@ -1875,11 +1876,13 @@ def write_bat_activation_text(file_handle, m):
             file_handle.write('set CONDA_MAX_SHLVL=2\n')
 
     # Write build prefix activation AFTER host prefix, so that its executables come first
+    # But it seems that
     if conda_46:
         file_handle.write('call "{conda_bat}" activate --stack "{prefix}"\n'.format(
             conda_bat=conda_bat,
             prefix=m.config.build_prefix,
         ))
+        file_handle.write('echo %PATH%\n')
     else:
         file_handle.write('call "{conda_root}\\activate.bat" "{prefix}"\n'.format(
             conda_root=root_script_dir,
