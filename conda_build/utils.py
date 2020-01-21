@@ -1830,14 +1830,26 @@ def sha256_checksum(filename, buffersize=65536):
     return sha256.hexdigest()
 
 
-def write_bat_activation_text(file_handle, m):
+def write_echo_PATH(file_handle, pkg_name, name):
+    # Yuck
+    name_no_spaces = name.replace(' ', '-').replace('.', '-').replace('--', '-')
+    file_handle.write('echo PATH at :: {name}\n'.format(name = name))
+    sys_python = '%SYS_PYTHON%'
+    file_handle.write("{python} -c \"import os; print('\\n'.join(os.environ['PATH'].split(';')))\"\n".format(
+        python = sys_python))
+    file_handle.write("{python} -c \"import os; print('\\n'.join(os.environ['PATH'].split(';')))\" > path.cb.{pkg_name}.{name}\n".format(
+        python = sys_python, pkg_name = pkg_name, name = name_no_spaces))
+
+
+def write_bat_activation_text(file_handle, file_name, m):
     conda_hook_bat = os.path.normpath(os.path.join(root_script_dir, '..', 'condabin', 'conda_hook.bat'))
     conda_bat = os.path.normpath(os.path.join(root_script_dir, '..', 'condabin', 'conda.bat'))
-
+    pkg_name, _, _ = os.path.basename(file_name).rpartition('.')
     if conda_46:
+        write_echo_PATH(file_handle, pkg_name, '1. before condahook')
         file_handle.write('call "{conda_hook_bat}"\n'.format(
-            conda_hook_bat=conda_hook_bat,
-        ))
+            conda_hook_bat=conda_hook_bat))
+        write_echo_PATH(file_handle, pkg_name, '2. after condahook')
     if m.is_cross:
         # HACK: we need both build and host envs "active" - i.e. on PATH,
         #     and with their activate.d scripts sourced. Conda only
@@ -1866,7 +1878,7 @@ def write_bat_activation_text(file_handle, m):
                 conda_bat=conda_bat,
                 prefix=m.config.host_prefix,
             ))
-            file_handle.write('echo %PATH%\n')
+            write_echo_PATH(file_handle, pkg_name, '3. after activate prefix')
         else:
             file_handle.write('call "{conda_root}\\activate.bat" "{prefix}"\n'.format(
                 conda_root=root_script_dir,
@@ -1878,11 +1890,11 @@ def write_bat_activation_text(file_handle, m):
     # Write build prefix activation AFTER host prefix, so that its executables come first
     # But it seems that
     if conda_46:
-        file_handle.write('call "{conda_bat}" activate --stack "{prefix}"\n'.format(
+        file_handle.write('call "{conda_bat}" activate --stack "{build_prefix}"\n'.format(
             conda_bat=conda_bat,
-            prefix=m.config.build_prefix,
+            build_prefix=m.config.build_prefix,
         ))
-        file_handle.write('echo %PATH%\n')
+        write_echo_PATH(file_handle, pkg_name, '4. after activate --stack build_prefix')
     else:
         file_handle.write('call "{conda_root}\\activate.bat" "{prefix}"\n'.format(
             conda_root=root_script_dir,
