@@ -1,0 +1,38 @@
+{% set version = "1" %}
+
+package:
+  name: test-conda-run-in-recipe
+  version: {{ version }}
+
+source:
+  - path: .
+
+build:
+  number: 0
+  skip: True  # [win and py<30]
+
+requirements:
+
+outputs:
+  - name: py-test-conda-run-in-recipe
+    script: install-py-test-conda-run-in-recipe.sh   # [unix]
+    script: install-py-test-conda-run-in-recipe.bat  # [win]
+    build:
+      run_exports:
+        - {{ pin_subpackage('test-conda-run-in-recipe', max_pin='x.x') }}
+    requirements:
+      host:
+        - {{ pin_subpackage('test-conda-run-in-recipe', exact=True) }}
+        - python
+        - setuptools
+        - pip
+      run:
+        - {{ pin_subpackage('test-conda-run-in-recipe', exact=True) }}
+        - python
+
+  - name: test-conda-run-in-recipe
+    script: install-test-conda-run-in-recipe.sh        # [unix]
+    script: install-test-conda-run-in-recipe.bat       # [win]
+    build:
+      run_exports:
+        - {{ pin_subpackage('test-conda-run-in-recipe', max_pin='x.x') }}
