@@ -1067,10 +1067,16 @@ def _lookup_in_prefix_packages(errors, needed_dso, files, run_prefix, whitelist,
                                                                      in_prefix_dso), verbose=verbose)
 
 
+# Want to stop printing anything here. We should just collect more file_info fields instead.
+# We should also allow multiple states to be determined and returned. A DSO  can be both in
+# the whilelist and in a (build or host) package (including in the package itself).
 def calculate_packages_used(file_info, pkg_name, path_groups, whitelist, verbose=True):
     packages_used = set()
     prefix_for_file = dict()
     for f, fi in file_info.items():
+        warn_prelude = "WARNING ({},{})".format(pkg_name, f)
+        err_prelude = "  ERROR ({},{})".format(pkg_name, f)
+        info_prelude = "   INFO ({},{})".format(pkg_name, f)
         if 'libc-2.12.2.so' in f:
             print('debug')
         for prefix_type, prefix_and_files in path_groups.items():
@@ -1088,9 +1094,14 @@ def calculate_packages_used(file_info, pkg_name, path_groups, whitelist, verbose
         path_group = path_groups[prefix_type]
         rp = prefix_type_relpath['relpath']
         if f in file_info:
+            if 'api-ms-win-' in f:
+                print("debug")
             fi = file_info[f]
+            fi['libraries']['packages'] = []
             if 'libraries' not in fi or 'resolved' not in fi['libraries']:
                 continue
+
+            # Resolve regardless of in_whitelist or not.
             for resolved in fi['libraries']['resolved']:
                 if resolved in file_info:
                     # Do I need to figure out which path_group it is in? Yes.
@@ -1105,20 +1116,21 @@ def calculate_packages_used(file_info, pkg_name, path_groups, whitelist, verbose
                         print(pkg)
                         packages_used.add(pkg)
                         print(" .. {} uses {} from {} in {}".format(rp, r_rp, pkg, r_prefix_type))
+                        fi['libraries']['packages'].append(pkg)
                     else:
                         print(" .. {} uses {} from {}".format(rp, r_rp, r_prefix_type))
-            # This is nonsense! Should run a loop per resolved library instead.
-            in_whitelist = any([fnmatch(resolved, w) for w in whitelist])
-            if in_whitelist:
-                n_dso_p = "Needed DSO {}".format(resolved)
-                _print_msg(errors, '{}: {} found in the whitelist'.
-                           format(info_prelude, n_dso_p), verbose=verbose)
+                        fi['libraries']['packages'].append(None)
+
+                    if resolved:
+                        in_whitelist = any([fnmatch(resolved, w) for w in whitelist])
+                        if in_whitelist:
+                            n_dso_p = "Needed DSO {}".format(f)
+                            print('{}: {} found in the whitelist'.
+                                  format(info_prelude, n_dso_p))
+                    else:
+                        print("FRAK2")
         else:
             print("FRAK!")
-
-        warn_prelude = "WARNING ({},{})".format(pkg_name, f)
-        err_prelude = "  ERROR ({},{})".format(pkg_name, f)
-        info_prelude = "   INFO ({},{})".format(pkg_name, f)
     return packages_used
 
 def _show_linking_messages(files, errors, file_info, build_prefix, run_prefix, pkg_name,
