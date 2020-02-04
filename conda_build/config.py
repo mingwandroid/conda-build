@@ -547,26 +547,39 @@ class Config(object):
         return res
 
     def compute_build_id(self, package_name, reset=False):
+        # Use the most recent build with matching recipe name, or else the recipe name.
+        build_folders = sorted([build_folder for build_folder in get_build_folders(self.croot)
+                                if build_folder[:build_folder.rfind('_')] == package_name])
+        prev_or_def_build_id = None
+        if build_folders:
+            # Use the most recent build with matching recipe name
+            prev_or_def_build_id = os.path.basename(build_folders[-1])
+            old_dir  = os.path.join(build_folders[-1], 'work')
+        else:
+            prev_or_def_build_id = package_name
+            test_old_dir = join(self.croot, package_name, 'work')
+            old_dir = test_old_dir if os.path.exists(test_old_dir) else None
+
         if self.set_build_id and (not self._build_id or reset):
             assert not os.path.isabs(package_name), ("package name should not be a absolute path, "
                                                      "to preserve croot during path joins")
-            folder_basenames = [os.path.basename(fldr) for fldr in get_build_folders(self.croot)]
-            build_folders = sorted([build_folder for build_folder in folder_basenames
-                            if build_folder[:build_folder.rfind('_')] == package_name])
-            if self.dirty and build_folders:
-                # Use the most recent build with matching recipe name
-                self._build_id = build_folders[-1]
+            if self.dirty and prev_or_def_build_id:
+                build_id = prev_or_def_build_id
             else:
-                old_dir = self.work_dir if len(os.listdir(self.work_dir)) > 0 else ""
+                old_dir = self.work_dir if len(os.listdir(self.work_dir)) > 0 else None
                 # here we uniquely name folders, so that more than one build can happen concurrently
                 #    keep 6 decimal places so that prefix < 80 chars
                 build_id = package_name + "_" + str(int(time.time() * 1000))
-                # important: this is recomputing prefixes and determines where work folders are.
-                self._build_id = build_id
-                if old_dir:
-                    work_dir = self.work_dir
-                    rm_rf(work_dir)
-                    shutil.move(old_dir, work_dir)
+        else:
+            build_id = prev_or_def_build_id
+
+        # important: this is recomputing prefixes and determines where work folders are.
+        self._build_id = build_id
+        if old_dir:
+            work_dir = self.work_dir
+            if old_dir != work_dir:
+                rm_rf(work_dir)
+                shutil.move(old_dir, work_dir)
 
     @property
     def build_id(self):
