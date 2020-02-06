@@ -18,6 +18,7 @@ from .variants import get_default_variant
 from .conda_interface import cc_platform, cc_conda_build, subdir, url_path
 
 from .utils import get_build_folders, rm_rf, get_logger, get_conda_operation_locks
+import sys
 
 on_win = (sys.platform == 'win32')
 
@@ -105,7 +106,7 @@ def _get_default_settings():
             Setting('filename_hashing', cc_conda_build.get('filename_hashing',
                                                            'true').lower() == 'true'),
             Setting('keep_old_work', False),
-            Setting('_src_cache_root', cc_conda_build_get_host_dir('cache_dir')),
+            Setting('_src_cache_root', cc_conda_build_get_host_dir('cache_dir', sys.base_prefix)),
             Setting('copy_test_source_files', True),
 
             # should rendering cut out any skipped metadata?

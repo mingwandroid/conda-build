@@ -635,6 +635,9 @@ class FakeDist:
         self.build_number = build_number
         self.build_string = build_str
 
+    def to_json(self):
+        return 'FakeDist('+self.name+')'
+
 
 DEFAULT_MAC_WHITELIST = ['/opt/X11/',
                          '/usr/lib/libSystem.B.dylib',
@@ -1475,9 +1478,16 @@ def check_overlinking_impl(pkg_name, pkg_version, build_str, build_number,
             sys.exit(1)
 
     # Make a record of some sort to store with this package so we do not recalculate it all the time:
-    for f, fi in file_info.items():
+    def dumper(self):
+        try:
+            return self.to_json()
+        except:
+            return self.__dict__
+
+    ordered_file_info = OrderedDict(sorted(file_info.items(), key=lambda t: t[0]))
+    for f, fi in ordered_file_info.items():
         if f in prefix_owners and prefix_owners[f] == pkg_vendored_dist:
-            print(fi)
+            print(json.dumps(fi, default=dumper, indent=2))
 
     return dict()
 
