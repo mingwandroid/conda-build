@@ -547,33 +547,35 @@ class Config(object):
             res = join(prefix, 'bin', 'Rscript')
         return res
 
-    def compute_build_id(self, package_name, reset=False):
+    def compute_build_id(self, package_name, package_version, reset=False):
         # Use the most recent build with matching recipe name, or else the recipe name.
         build_folders = sorted([build_folder for build_folder in get_build_folders(self.croot)
-                                if build_folder[:build_folder.rfind('_')] == package_name])
-        prev_or_def_build_id = None
+                                if build_folder[:build_folder.rfind('_')] == package_name + '-' + package_version])
+        prev_build_id = None
+        def_build_id = None
         if build_folders:
             # Use the most recent build with matching recipe name
-            prev_or_def_build_id = os.path.basename(build_folders[-1])
-            old_dir  = os.path.join(build_folders[-1], 'work')
+            prev_build_id = os.path.basename(build_folders[-1])
+            old_dir = os.path.join(build_folders[-1], 'work')
         else:
-            prev_or_def_build_id = package_name
+            def_build_id = self.build_id_pat if self.build_id_pat else '{n}-{v}_{t}'
+            pat_dict = {'n': package_name,
+                        'v': str(package_version),
+                        't': str(int(time.time() * 1000))}
+            def_build_id = def_build_id.format(**pat_dict)
             test_old_dir = join(self.croot, package_name, 'work')
             old_dir = test_old_dir if os.path.exists(test_old_dir) else None
 
         if self.set_build_id and (not self._build_id or reset):
             assert not os.path.isabs(package_name), ("package name should not be a absolute path, "
                                                      "to preserve croot during path joins")
-            if self.dirty and prev_or_def_build_id:
-                build_id = prev_or_def_build_id
-            else:
+            if self.dirty and prev_build_id:
                 old_dir = self.work_dir if len(os.listdir(self.work_dir)) > 0 else None
-                # here we uniquely name folders, so that more than one build can happen concurrently
-                #    keep 6 decimal places so that prefix < 80 chars
-                build_id = package_name + "_" + str(int(time.time() * 1000))
+                build_id = prev_build_id
+            else:
+                build_id = def_build_id
         else:
-            build_id = prev_or_def_build_id
-
+            build_id = prev_build_id if prev_build_id else def_build_id
         # important: this is recomputing prefixes and determines where work folders are.
         self._build_id = build_id
         if old_dir:
