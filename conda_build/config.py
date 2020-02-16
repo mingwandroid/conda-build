@@ -207,6 +207,10 @@ def _get_default_settings():
             Setting('conda_pkg_format', cc_conda_build.get('pkg_format', None)),
 
             Setting('suppress_variables', False),
+
+            Setting('build_id_pat', cc_conda_build.get('build_id_pat',
+                                                            '%n_%t')),
+
             ]
 
 
