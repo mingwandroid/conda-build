@@ -208,7 +208,7 @@ different sets of packages."""
         help=("specify a templated pattern to use as build folder names.  Use if having issues with "
               "paths being too long."),
         dest='build_id_pat',
-        default=cc_conda_build.get('build_id_pat', '%n_%t'),
+        default=cc_conda_build.get('build_id_pat', '{n}_{t}'),
     )
     p.add_argument(
         "--croot",
