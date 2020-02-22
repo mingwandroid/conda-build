@@ -1899,6 +1899,23 @@ def write_bat_activation_text(file_handle, file_name, m):
         file_handle.write('call "{conda_root}\\activate.bat" "{prefix}"\n'.format(
             conda_root=root_script_dir,
             prefix=m.config.build_prefix))
+    from conda_build.os_utils.external import find_preferably_prefixed_executable
+    ccache = find_preferably_prefixed_executable('ccache', m.config.build_prefix, True)
+    if ccache:
+        ccache_method_env_vars = True
+        ccache_method_mklink = True
+        if ccache_method_env_vars:
+            file_handle.write('set CC={ccache} %CC%\n'.format(ccache=ccache))
+            file_handle.write('set CXX={ccache} %CXX%\n'.format(ccache=ccache))
+        if ccache_method_mklink:
+            file_handle.write('mkdir %BUILD_PREFIX%\ccache-ln-bin\n')
+            file_handle.write('pushd %BUILD_PREFIX%\ccache-ln-bin\n')
+            # If you use mklink.exe instead of mklink here it breaks as it's a builtin.
+            for ext in ('', '.exe'):
+                file_handle.write('mklink cl{ext} {ccache}\n'.format(ext = ext, ccache = ccache))
+                file_handle.write('mklink link{ext} {ccache}\n'.format(ext = ext, ccache = ccache))
+            file_handle.write('popd\n')
+            file_handle.write('set PATH={dirname_ccache};%PATH%\n'.format(dirname_ccache = os.path.dirname(ccache)))
 
 
 channeldata_cache = {}
