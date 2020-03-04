@@ -62,6 +62,17 @@ SUBDIR_ALIASES = {
 Setting = namedtuple("ConfigSetting", "name, default")
 
 
+def cc_conda_build_get_host_dir(name, default=None):
+    result = cc_conda_build.get(name) if cc_conda_build.get(name) else default
+    if result:
+        # This is a consideration for people running WSL, sharing a condarc between systems.
+        if not sys.platform.startswith('win') and result[1] == ':' and 'A' <= result[0] <= 'z':
+                import subprocess
+                result = subprocess.check_output(['wslpath', '-u', result]).decode('utf-8').splitlines()[0]
+        result = abspath(expanduser(expandvars(result)))
+    return result
+
+
 def _get_default_settings():
     return [Setting('activate', True),
             Setting('anaconda_upload', binstar_upload),
@@ -94,8 +105,7 @@ def _get_default_settings():
             Setting('filename_hashing', cc_conda_build.get('filename_hashing',
                                                            'true').lower() == 'true'),
             Setting('keep_old_work', False),
-            Setting('_src_cache_root', abspath(expanduser(expandvars(
-                cc_conda_build.get('cache_dir')))) if cc_conda_build.get('cache_dir') else None),
+            Setting('_src_cache_root', cc_conda_build_get_host_dir('cache_dir', sys.base_prefix)),
             Setting('copy_test_source_files', True),
 
             # should rendering cut out any skipped metadata?
@@ -196,6 +206,10 @@ def _get_default_settings():
             Setting('conda_pkg_format', cc_conda_build.get('pkg_format', None)),
 
             Setting('suppress_variables', False),
+
+            Setting('build_id_pat', cc_conda_build.get('build_id_pat',
+                                                            '{n}_{t}')),
+
             ]
 
 
@@ -536,27 +550,42 @@ class Config(object):
             res = join(prefix, 'bin', 'Rscript')
         return res
 
-    def compute_build_id(self, package_name, reset=False):
+    def compute_build_id(self, package_name, package_version, reset=False):
+        # Use the most recent build with matching recipe name, or else the recipe name.
+        build_folders = sorted([build_folder for build_folder in get_build_folders(self.croot)
+                                if build_folder[:build_folder.rfind('_')] == package_name + '-' + package_version])
+        prev_build_id = None
+        def_build_id = None
+        if build_folders:
+            # Use the most recent build with matching recipe name
+            prev_build_id = os.path.basename(build_folders[-1])
+            old_dir = os.path.join(build_folders[-1], 'work')
+        else:
+            def_build_id = self.build_id_pat if self.build_id_pat else '{n}-{v}_{t}'
+            pat_dict = {'n': package_name,
+                        'v': str(package_version),
+                        't': str(int(time.time() * 1000))}
+            def_build_id = def_build_id.format(**pat_dict)
+            test_old_dir = join(self.croot, package_name, 'work')
+            old_dir = test_old_dir if os.path.exists(test_old_dir) else None
+
         if self.set_build_id and (not self._build_id or reset):
             assert not os.path.isabs(package_name), ("package name should not be a absolute path, "
                                                      "to preserve croot during path joins")
-            folder_basenames = [os.path.basename(fldr) for fldr in get_build_folders(self.croot)]
-            build_folders = sorted([build_folder for build_folder in folder_basenames
-                            if build_folder[:build_folder.rfind('_')] == package_name])
-            if self.dirty and build_folders:
-                # Use the most recent build with matching recipe name
-                self._build_id = build_folders[-1]
+            if self.dirty and prev_build_id:
+                old_dir = self.work_dir if len(os.listdir(self.work_dir)) > 0 else None
+                build_id = prev_build_id
             else:
-                old_dir = self.work_dir if len(os.listdir(self.work_dir)) > 0 else ""
-                # here we uniquely name folders, so that more than one build can happen concurrently
-                #    keep 6 decimal places so that prefix < 80 chars
-                build_id = package_name + "_" + str(int(time.time() * 1000))
-                # important: this is recomputing prefixes and determines where work folders are.
-                self._build_id = build_id
-                if old_dir:
-                    work_dir = self.work_dir
-                    rm_rf(work_dir)
-                    shutil.move(old_dir, work_dir)
+                build_id = def_build_id
+        else:
+            build_id = prev_build_id if prev_build_id else def_build_id
+        # important: this is recomputing prefixes and determines where work folders are.
+        self._build_id = build_id
+        if old_dir:
+            work_dir = self.work_dir
+            if old_dir != work_dir:
+                rm_rf(work_dir)
+                shutil.move(old_dir, work_dir)
 
     @property
     def build_id(self):
