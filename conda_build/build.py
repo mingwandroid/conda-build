@@ -3262,8 +3262,11 @@ def handle_anaconda_upload(paths, config):
 # If you want to upload package(s) to anaconda.org later, type:
 
 """
-    for package in paths:
-        no_upload_message += "anaconda upload {}\n".format(package)
+    if not utils.on_win or 'MSYSTEM' in os.environ:
+        joiner = " \\\n    "
+    else:
+        joiner = " ^\n    "
+    no_upload_message += "anaconda upload{}".format(joiner) + joiner.join(paths)
 
     no_upload_message += """\
 
