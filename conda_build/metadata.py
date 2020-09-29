@@ -308,33 +308,27 @@ def _variants_equal(metadata, output_metadata):
 
 
 def ensure_matching_hashes(output_metadata):
-    # envs = 'build', 'host', 'run'
-    envs = 'host', 'run'
+    envs = 'build', 'host', 'run'
     problemos = []
-    for env in envs:
-        problemos_env = []
-        for (_, m) in output_metadata.values():
-            for (_, om) in output_metadata.values():
-                if m != om:
-                    if env == 'run':
-                        run_exports = om.meta.get('build', {}).get('run_exports', [])
-                    else:
-                        run_exports = []
-                    if hasattr(run_exports, 'keys'):
-                        run_exports_list = []
-                        for export_type in utils.RUN_EXPORTS_TYPES:
-                            run_exports_list = run_exports_list + run_exports.get(export_type, [])
-                        run_exports = run_exports_list
-                    deps = _get_all_dependencies(om, (env,)) + run_exports
-                    for dep in deps:
-                        if (dep.startswith(m.name() + ' ') and len(dep.split(' ')) == 3 and
-                                dep.split(' ')[-1] != m.build_id() and _variants_equal(m, om)):
-                            problemos_env.append((env, m.name(), m.build_id(), dep, om.name()))
-        problemos.extend(problemos_env)
+    for (_, m) in output_metadata.values():
+        for (_, om) in output_metadata.values():
+            if m != om:
+                run_exports = om.meta.get('build', {}).get('run_exports', [])
+                if hasattr(run_exports, 'keys'):
+                    run_exports_list = []
+                    for export_type in utils.RUN_EXPORTS_TYPES:
+                        run_exports_list = run_exports_list + run_exports.get(export_type, [])
+                    run_exports = run_exports_list
+                deps = _get_all_dependencies(om, envs) + run_exports
+                for dep in deps:
+                    if (dep.startswith(m.name() + ' ') and len(dep.split(' ')) == 3 and
+                            dep.split(' ')[-1] != m.build_id() and _variants_equal(m, om)):
+                        problemos.append((m.name(), m.build_id(), dep, om.name()))
+
     if problemos:
         error = ""
         for prob in problemos:
-            error += "Mismatching package in {} env: {} (id {}); dep: {}; consumer package: {}\n".format(*prob)
+            error += "Mismatching package: {} (id {}); dep: {}; consumer package: {}\n".format(*prob)
         raise exceptions.RecipeError("Mismatching hashes in recipe. Exact pins in dependencies "
                                      "that contribute to the hash often cause this. Can you "
                                      "change one or more exact pins to version bound constraints?\n"
@@ -2212,13 +2206,8 @@ class MetaData(object):
         reqs_text, recipe_text = self._get_used_vars_meta_yaml_helper(
             force_top_level=force_top_level, force_global=force_global, apply_selectors=False)
 
-        import time
-        time_s = time.time()
         all_used_selectors = variants.find_used_variables_in_text(variant_keys, recipe_text,
                                                                     selectors=True)
-        time_e = time.time()
-        log = utils.get_logger(__name__)
-        log.warning("time to find_used_variables_in_text is {}".format(time_e - time_s))
 
         reqs_text, recipe_text = self._get_used_vars_meta_yaml_helper(
             force_top_level=force_top_level, force_global=force_global, apply_selectors=True)
@@ -2280,8 +2269,8 @@ class MetaData(object):
     @property
     def activate_build_script(self):
         b = self.meta.get('build', {}) or {}
-        should_activate = b.get('activate_in_script') is not False
-        return bool(self.config.activate and should_activate) and not self.name() == 'conda'
+        should_activate = (self.uses_new_style_compiler_activation or b.get('activate_in_script') is not False)
+        return bool(self.config.activate and should_activate)
 
     @property
     def build_is_host(self):
