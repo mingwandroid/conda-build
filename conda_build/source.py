@@ -250,8 +250,8 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
             check_call_env(args + [git_url, git_mirror_dir], stdout=stdout, stderr=stderr)
         assert isdir(mirror_dir)
 
-    # Now clone from mirror_dir into checkout_dir.
-    check_call_env([git, 'clone', git_mirror_dir, git_checkout_dir], stdout=stdout, stderr=stderr)
+    # Now clone from mirror_dir into checkout_dir. We save a lot of time by using --depth 1
+    check_call_env([git, 'clone', '--depth', '1', 'file://' + git_mirror_dir, git_checkout_dir], stdout=stdout, stderr=stderr)
     if is_top_level:
         checkout = git_ref
         if git_url.startswith('.'):
@@ -260,8 +260,13 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
         if verbose:
             print('checkout: %r' % checkout)
         if checkout:
-            check_call_env([git, 'checkout', checkout],
-                           cwd=checkout_dir, stdout=stdout, stderr=stderr)
+            try:
+                check_call_env([git, 'checkout', checkout],
+                               cwd=checkout_dir, stdout=stdout, stderr=stderr)
+            except Exception as e:
+                output = check_output_env([git, 'checkout', checkout], cwd=checkout_dir)
+                log.error("check_call_env({}) failed, stdout is:\n{}".format(', '.join([git, 'checkout', checkout]), output))
+                raise e
 
     # submodules may have been specified using relative paths.
     # Those paths are relative to git_url, and will not exist
