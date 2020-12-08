@@ -1771,8 +1771,7 @@ class MetaData(object):
 
     @property
     def uses_new_style_compiler_activation(self):
-        text = self.extract_requirements_text()
-        return bool(re.search(r'\{\{\s*compiler\(.*\)\s*\}\}', text))
+        return True
 
     def validate_features(self):
         if any('-' in feature for feature in ensure_list(self.get_value('build/features'))):
@@ -2286,10 +2285,8 @@ class MetaData(object):
 
     @property
     def build_is_host(self):
-        manual_overrides = self.meta.get('build', {}).get('merge_build_host') is True or self.config.build_is_host
-        manually_disabled = self.meta.get('build', {}).get('merge_build_host') is False
-        return manual_overrides or (self.config.subdirs_same and not manually_disabled and
-             'host' not in self.meta.get('requirements', {}) and not self.uses_new_style_compiler_activation)
+        return False
+
 
     def get_top_level_recipe_without_outputs(self):
         recipe_no_outputs = self.get_recipe_text(force_top_level=True).replace(

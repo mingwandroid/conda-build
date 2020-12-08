@@ -1588,7 +1588,7 @@ def bundle_conda(output, metadata, env, stats, **kw):
                                               " executable.  You need to alter your recipe to "
                                               " use the {1} env var in your recipe to "
                                               "run that executable.".format(dep, env_var_name))
-                elif (dep in build_pkgs and metadata.uses_new_style_compiler_activation):
+                elif (dep in build_pkgs):
                     link = ("https://conda.io/docs/user-guide/tasks/build-packages/"
                             "define-metadata.html#host")
                     raise CondaBuildException("Empty package; {0} dep present in build but not "
