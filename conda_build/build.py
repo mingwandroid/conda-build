@@ -700,7 +700,8 @@ def copy_recipe(m):
 
         rendered = output_yaml(output_metadata)
         if m.config.debug:
-            log.debug("Rendered recipe is: {}\n".rendered)
+            log = utils.get_logger(__name__)
+            log.debug("Rendered recipe is: {}\n".format(rendered))
 
         if original_recipe:
             with open(original_recipe, 'rb') as f:
@@ -1894,6 +1895,7 @@ def create_build_envs(m, notest):
     host_ms_deps = [utils.ensure_valid_spec(spec) for spec in host_ms_deps]
     print("build_ms_deps:\n{}".format(build_ms_deps))
     print("host_ms_deps:\n{}".format(host_ms_deps))
+    print("m.is_cross: {} m.build_is_host: {}".format(m.is_cross, m.build_is_host))
 
     m.config._merge_build_host = m.build_is_host
 
