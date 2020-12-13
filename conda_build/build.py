@@ -699,6 +699,8 @@ def copy_recipe(m):
                                             ('build/script', 'test/commands'))
 
         rendered = output_yaml(output_metadata)
+        if m.config.debug:
+            log.debug("Rendered recipe is: {}\n".rendered)
 
         if original_recipe:
             with open(original_recipe, 'rb') as f:
