@@ -269,7 +269,7 @@ def git_mirror_checkout_recursive(git, mirror_dir, checkout_dir, git_url, git_ca
     # it so.
     try:
         submodules = check_output_env([git, 'config', '--file', '.gitmodules', '--get-regexp',
-                                   'url'], stderr=stdout, cwd=checkout_dir)
+                                       'url'], stderr=stdout, cwd=checkout_dir)
         submodules = submodules.decode('utf-8').splitlines()
     except CalledProcessError:
         submodules = []

@@ -2,6 +2,8 @@ import argparse
 from conda_build.conda_interface import iteritems
 from conda_build.source import download_to_cache
 from conda_build.license_family import guess_license_family
+from conda.models.version import VersionOrder
+
 from copy import copy
 try:
     import cPickle as pickle
@@ -128,7 +130,7 @@ CDTs = dict({'centos5': {'dirname': 'centos5',
                        'short_name': 'cos7',
                        'base_url': 'http://download.sinenomine.net/clefos/7/os/{base_architecture}/',  # noqa
                        'sbase_url': 'http://download.sinenomine.net/clefos/7/source/srpms/', # noqa
-                       'repomd_url': 'http://download.sinenomine.net/clefos/7/os/repodata/repomd.xml', # noqa
+                       'repomd_url': 'http://download.sinenomine.net/clefos/7/os/repodata/repomd.xml',  # noqa
                        'host_machine': '{gnu_architecture}-conda-cos7-linux-gnu',
                        'host_subdir': 'linux-s390x',
                        'fname_architecture': '{architecture}',
@@ -137,7 +139,23 @@ CDTs = dict({'centos5': {'dirname': 'centos5',
                        'checksummer_name': "sha256",
                        'macros': {'pyver': '2.7.5',
                                   'gdk_pixbuf_base_version': '2.36.2'}},
-            'suse_leap_rpi3': {'dirname': 'suse_leap_rpi3',
+             'amazonlinux2': {'dirname': 'amazonlinux2',
+                              'short_name': 'amzl2',
+                              'use_only_basename': True,
+                              # 'base_url': 'http://amazonlinux.us-west-2.amazonaws.com/2/core/2.0/{base_architecture}/34112b4f91c3e1ecf2b2e90cfd565b12690fa3c6a3e71a5ac19029d2a9bd3869/',  # noqa
+                              'base_url': 'https://graviton-rpms.s3.amazonaws.com/amzn2-core_2021_01_26/amzn2-core/',
+                              # 'sbase_url': 'http://amazonlinux.us-west-2.amazonaws.com/2/core/latest/SRPMS/',
+                              'sbase_url': 'https://graviton-rpms.s3.amazonaws.com/amzn2-core-source_2021_01_26/amzn2-core-source/',# noqa
+                              'repomd_url': 'http://amazonlinux.us-west-2.amazonaws.com/2/core/2.0/aarch64/34112b4f91c3e1ecf2b2e90cfd565b12690fa3c6a3e71a5ac19029d2a9bd3869/repodata/repomd.xml',  # noqa
+                              'host_machine': '{gnu_architecture}-conda-cos7-linux-gnu',
+                              'host_subdir': 'linux-aarch64',
+                              'fname_architecture': '{architecture}',
+                              'rpm_filename_platform': 'el7.{architecture}',
+                              'checksummer': hashlib.sha256,
+                              'checksummer_name': "sha256",
+                              'macros': {'pyver': '2.7.18',
+                                         'gdk_pixbuf_base_version': '2.36.12'}},
+             'suse_leap_rpi3': {'dirname': 'suse_leap_rpi3',
                                'short_name': 'slrpi3',
                                # I cannot locate the src.rpms for OpenSUSE leap. The existence
                                # of this key tells this code to ignore missing src rpms but we
@@ -407,10 +425,24 @@ def massage_primary(repo_primary, src_cache, cdt):
                             'requires': requires})
         if name in new_dict:
             if arch in new_dict[name]:
-                print("WARNING: Duplicate packages exist for {} for arch {}".format(name, arch))
-            new_dict[name][arch] = new_package
+                new_dict[name][arch].append(new_package)
+            else:
+                new_dict[name][arch] = [new_package]
         else:
-            new_dict[name] = dict({arch: new_package})
+            new_dict[name] = dict({arch: [new_package]})
+
+    # print("new_dict is {}".format(new_dict))
+    # Sort any packages which have multiple entries per arch by their version .. and while it
+    # would be nice to return all the packages, the rest of this code does not expect a list
+    # so we ditch the others and the list for now.
+    for name, package in new_dict.items():
+        for arch, packages in package.items():
+            # print("Sorting {} packages:\n{}".format(name, packages))
+            ps = sorted(packages,
+                key=lambda p=package: VersionOrder(re.sub('_+', '_', (p['version']['epoch'] + '!' +  # [noqa]
+                                                                      p['version']['ver'].replace('svn', '') + '_' +
+                                                                      p['version']['rel'].replace('.amzn2', '')))))
+            new_dict[name][arch] = ps[len(ps) - 1]
     return new_dict
 
 
@@ -471,8 +503,12 @@ def write_conda_recipes(recursive, repo_primary, package, architectures,
     else:
         arch = cdt['fname_architecture']
     package = entry_name
-    rpm_url = dirname(dirname(cdt['base_url'])) + '/' + entry['location']
-    srpm_url = cdt['sbase_url'] + entry['source']
+    if 'use_only_basename' in cdt and cdt['use_only_basename']:
+        rpm_url = dirname(cdt['base_url']) + '/' + basename(entry['location'])
+        srpm_url = cdt['sbase_url'] + basename(entry['source'])
+    else:
+        rpm_url = dirname(dirname(cdt['base_url'])) + '/' + entry['location']
+        srpm_url = cdt['sbase_url'] + entry['source']
     _, _, _, _, _, sha256str = rpm_split_url_and_cache(rpm_url, src_cache)
     try:
         # We ignore the hash of source RPMs since they
